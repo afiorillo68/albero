@@ -374,6 +374,46 @@ select[size] { padding: 4px !important; }
 .esiti .nome-esito { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .esiti .anni { margin-left: auto; color: var(--tenue); font-size: 13px; white-space: nowrap; }
 
+/* ------------------------------------------------ cosa manca */
+.riepilogo-manca { margin: 12px 0 4px; padding: 12px 14px; border-radius: 12px; background: var(--accento-chiaro); }
+.riepilogo-manca p { margin: 0 0 8px; line-height: 1.4; }
+.avanzamento { display: block; height: 6px; border-radius: 6px; background: rgba(0, 0, 0, .08); overflow: hidden; }
+.avanzamento i { display: block; height: 100%; min-width: 2px; border-radius: 6px; background: var(--accento); }
+.famiglie-manca { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; }
+.famiglia-manca {
+  display: flex; flex-direction: column; align-items: stretch; gap: 3px; padding: 7px 9px 8px; border-radius: 10px;
+  border: 1.5px solid var(--b, #999); background: var(--c, #fff); cursor: pointer; text-align: left;
+}
+.famiglia-manca:hover { box-shadow: 0 2px 6px rgba(0, 0, 0, .1); }
+.famiglia-manca.attiva { box-shadow: 0 0 0 2px var(--barra-2); }
+.famiglia-manca .nome-famiglia { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.famiglia-manca .conto { font-size: 12px; color: #555; }
+.famiglia-manca .avanzamento { height: 4px; background: rgba(255, 255, 255, .75); }
+.famiglia-manca .avanzamento i { background: var(--b, #999); }
+.tipi-manca { margin: 16px 0 4px; }
+.fascia-manca h3 span { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.nota-fascia { margin: -2px 0 8px; padding: 6px 9px; border-radius: 8px; background: #fff8dc; color: #6e5300; font-size: 12.5px; line-height: 1.4; }
+.voci-manca { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.voce-manca { padding: 8px 10px 9px; border: 1px solid var(--linea); border-radius: 12px; background: #fff; }
+.voce-manca.coperta { border-style: dashed; background: #f6faf7; }
+.nome-voce { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none; cursor: pointer; font-size: 14.5px; font-weight: 600; text-align: left; }
+.nome-voce:hover span:last-child { text-decoration: underline; text-underline-offset: 2px; }
+.nome-voce.ignoto span:last-child { font-style: italic; font-weight: 400; color: var(--tenue); }
+.riconosci { margin: 2px 0 0 20px; color: var(--tenue); font-size: 12.5px; line-height: 1.35; }
+.riga-manca { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; margin: 7px 0 0 20px; }
+.dati-manca { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.dati-manca .etichetta { font-size: 12px; margin-right: 2px; }
+.dato-manca { display: inline-flex; flex-direction: column; padding: 2px 8px; border: 1px dashed #c9b98a; border-radius: 99px; background: #fffbe9; color: #5c4a00; font-size: 12.5px; line-height: 1.3; }
+.dato-manca.in-attesa { border: 1px solid #a9cdb5; border-radius: 8px; background: #e8f4ec; color: #24543a; }
+.dato-manca small { font-size: 11px; }
+.azioni-voce { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.lo-so { padding: 6px 12px; border: 1px solid #8fbf9f; border-radius: 9px; background: #eef7f1; color: #24543a; cursor: pointer; font-size: 13.5px; font-weight: 600; white-space: nowrap; }
+.lo-so:hover { background: #dff0e5; }
+/* nel modulo aperto da «Cosa manca»: che cosa manca, e i campi da compilare */
+.richiesta-manca { margin: 0; padding: 9px 12px; border-radius: 10px; background: #fff8dc; color: #5c4a00; font-size: 14px; line-height: 1.45; }
+.modulo fieldset.da-completare { border-color: #e3c75a; background: #fffdf2; }
+.modulo label.da-completare input { border-color: #e3c75a; background: #fffdf2; }
+
 /* ------------------------------------------------ telefono */
 @media (max-width: 760px) {
   :root { --barra-h: 52px; --nastro-h: 42px; }
@@ -383,6 +423,8 @@ select[size] { padding: 4px !important; }
   .comandi { gap: 0; }
   .comandi button span { display: none; }
   .comandi button { padding: 0 6px; }
+  /* con il link di modifica le icone sono otto: «Cosa manca» resta nel Menu, la ricerca ha spazio */
+  .modo-modifica #b-manca { display: none; }
   .marchio .logo { display: none; }
   #pannello {
     top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 72vh; border-radius: 18px 18px 0 0;

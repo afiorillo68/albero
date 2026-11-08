@@ -11,6 +11,7 @@ import { collocaNuova } from "./geometria.js";
 import { idArcoPartner, idArcoFiglio, NEUTRO } from "./scena.js";
 import { sezionePostit, gestisciPostit, azioneDiPostit } from "./postit.js";
 import { CAMPI_PERSONA, CAMPI_UNIONE, MISURE, EMAIL, differenze, riassunto } from "./proposte.js";
+import { CAMPO_MODULO } from "./mancanti.js";
 
 // ------------------------------------------------------------ utilità
 
@@ -157,8 +158,11 @@ export function mostraPersona(ctx, id) {
 
 // ------------------------------------------------------------ modulo della persona
 
-// opz.iniziale: campi che coprono quelli della scheda (proposta da modificare o da applicare)
-export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null, iniziale = null, suggerisci = null, commento = "", email = "", applica = null } = {}) {
+// opz.iniziale: campi che coprono quelli della scheda (proposta da modificare o da applicare).
+// Da «Cosa manca»: richiesta (la riga in cima), evidenzia (i campi che mancano, il primo prende
+// il cursore), torna (finito o annullato, al posto della scheda), da (per ricaricare la pagina).
+export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null, iniziale = null, suggerisci = null, commento = "", email = "", applica = null,
+  richiesta = "", evidenzia = [], torna = null, da = null } = {}) {
   const attuale = nuova || ctx.indici().persona.get(id);
   if (!attuale) return ctx.avviso("Questa persona non è più nell'albero.");
   const p = iniziale ? { ...attuale, ...iniziale } : attuale;
@@ -167,6 +171,7 @@ export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null,
   const html = `
     <form class="modulo" novalidate>
       ${richiamo(applica)}
+      ${richiesta ? `<p class="richiesta-manca">${esc(richiesta)}</p>` : ""}
       ${suggerisci ? `<p class="spiegazione">Correggi o completa quello che sai. Chi cura l'albero vedrà la tua proposta e la applicherà.</p>` : ""}
       <div class="due">
         <label>Nome <input name="nome" value="${esc(p.nome)}" autocomplete="off"${lungo(MISURE.nome)}></label>
@@ -207,11 +212,14 @@ export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null,
     </form>`;
   const titolo = suggerisci ? `Suggerisci: ${nomeCompleto(attuale)}` : applica ? `Applica: ${nomeCompleto(attuale)}`
     : nuova ? "Persona nuova" : `Modifica: ${nomeCompleto(attuale)}`;
+  const fine = torna || (() => mostraPersona(ctx, id));
   ctx.apriPannello(titolo, html, azione => {
-    if (azione === "annulla") (nuova ? ctx.chiudiPannello() : mostraPersona(ctx, id));
+    if (azione === "annulla") (nuova ? ctx.chiudiPannello() : fine());
   }, corpo => {
     const f = corpo.querySelector("form");
-    f.querySelector("[name=nome]").focus();
+    for (const nome of evidenzia) f.querySelector(`[name=${nome}]`)?.closest("fieldset, label")?.classList.add("da-completare");
+    const primo = f.querySelector(`[name=${evidenzia[0] || "nome"}]`);
+    if (evidenzia.length) { primo.focus({ preventScroll: true }); primo.scrollIntoView({ block: "center" }); } else primo.focus();
     f.addEventListener("submit", async e => {
       e.preventDefault();
       const v = n => f.elements[n].value;
@@ -234,7 +242,7 @@ export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null,
         const extra = invio(f, segnala);
         if (!extra) return;
         try {
-          if (await suggerisci({ azione: "dati", campi }, extra)) mostraPersona(ctx, id);
+          if (await suggerisci({ azione: "dati", campi }, extra)) fine();
         } catch (err) { ctx.errore(err); }
         return;
       }
@@ -249,10 +257,10 @@ export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null,
         if (dopoSalvataggio) await dopoSalvataggio(dopo);
         else await ctx.salva({ operazioni: [{ raccolta: "persone", id, dopo }], applicati: applicati(ctx, applica),
           descrizione: suSuggerimento(`Modificata la scheda di ${nomeCompleto(dopo)}`, applica) });
-        mostraPersona(ctx, dopo.id);
+        if (torna) torna(); else mostraPersona(ctx, dopo.id);
       } catch (err) { ctx.errore(err); }
     });
-  });
+  }, da ? { da } : {});
 }
 
 // ------------------------------------------------------------ scelta di una persona (nuova o esistente)
@@ -725,6 +733,20 @@ function daProposta(n) {
     : pr.azione === "genitori" ? { coppia: pr.coppia || null, nuovi: pr.nuovi || null }
     : { id: pr.persona || null, nuova: pr.nuova || null };
   return { iniziale, commento: n.testo || "", unione: pr.unione || null };
+}
+
+// «Cosa manca»: «Lo so io» (con il link di modifica «Completa») apre il modulo di sempre, con
+// in cima che cosa manca e il cursore sul dato scelto (primo); finito o annullato, torna.
+// I figli non noti si aggiungono dall'unione dei genitori, in un dialogo sopra l'elenco.
+export function completaDaElenco(ctx, voce, { primo = null, torna }) {
+  const opz = ctx.modifica ? {} : { suggerisci: inviaSuggerimento(ctx, voce.nodo, voce.tipo), email: ctx.email() };
+  if (voce.tipo === "unione") return apriModulo(ctx, voce.nodo, "unione", "figlio", opz);
+  const campi = voce.manca.map(m => m.campo);
+  const dati = voce.manca.map(m => `${m.testo}${m.attesa ? ` (già suggerito da ${m.attesa})` : ""}`);
+  const richiesta = campi[0] === "chi" ? "Non sappiamo chi è: scrivi il nome e il cognome, se li sai, e quello che sai di questa persona."
+    : `Manca: ${dati.join(", ").replace(/, ([^,]*)$/, " e $1")}.${campi.some(c => c === "nascita" || c === "morte") ? " Va bene anche solo l'anno; se non sei sicuro, spunta «circa»." : ""}`;
+  const evidenzia = [...new Set([primo, ...campi].filter(Boolean).flatMap(c => (c === "chi" ? ["nome", "cognome"] : [CAMPO_MODULO[c]])))];
+  apriModulo(ctx, voce.nodo, "persona", "dati", { ...opz, richiesta, evidenzia, torna, da: "mancanti" });
 }
 
 // Chi ha scritto il suggerimento lo riapre per cambiarlo; chi modifica lo applica.

@@ -11,7 +11,8 @@ import { cerca, nomeCompleto } from "./grafo.js";
 import { impagina, GEOMETRIA } from "./layout.js";
 import { ingressoLayout, annoDi, statoInVita } from "./deduzioni.js";
 import { filtriVuoti, attivi, visibilita, descriviIsolamento, ALTRI, MANCANTI, VOCI_VITA } from "./filtri.js";
-import { mostraPersona, mostraUnione, nuovaPersonaLibera } from "./scheda.js";
+import { mostraPersona, mostraUnione, nuovaPersonaLibera, completaDaElenco } from "./scheda.js";
+import { cosaManca, scegli, TIPI } from "./mancanti.js";
 import { mostraStorico } from "./storico.js";
 import { mostraTuttiPostit } from "./postit.js";
 import { CAMPI, GRUPPI, operatori, senzaValore, nuovaCondizione, criteriVuoti, completa, attiva as avanzataAttiva,
@@ -53,6 +54,8 @@ const S = {
   // ricerca avanzata: i criteri in modifica nel pannello e quelli applicati all'albero
   avanzata: criteriVuoti(), avanzataApplicata: null, esitoAvanzata: null,
   postit: [],
+  // «Cosa manca»: i filtri del pannello e lo scorrimento da ritrovare tornando da un modulo
+  mancanti: { tipo: null, famiglia: null, scorrimento: 0 },
   pannello: null, primoDisegno: true,
 };
 let dati = null, vista = null, disposizione = null;
@@ -167,9 +170,12 @@ function istantanea() {
     avanzata: S.avanzata, avanzataApplicata: S.avanzataApplicata,
     cerca: $("#cerca").value, trovati: [...S.trovati],
     disposizione: !$("#attrezzi").hidden,
-    pannello: !p ? null : p.modulo ? { persona: typeof p.di === "string" ? p.di : S.sel, unione: S.sel ? null : S.selUnione }
+    mancanti: { tipo: S.mancanti.tipo, famiglia: S.mancanti.famiglia },
+    // un modulo aperto da «Cosa manca» torna all'elenco, dov'era
+    pannello: !p ? null : p.modulo && p.da === "mancanti" ? { tipo: "mancanti" }
+      : p.modulo ? { persona: typeof p.di === "string" ? p.di : S.sel, unione: S.sel ? null : S.selUnione }
       : { persona: p.persona, unione: typeof p.unione === "string" ? p.unione : null, tipo: p.tipo },
-    scorrimento: $("#pannello-corpo").scrollTop,
+    scorrimento: p?.modulo && p.da === "mancanti" ? S.mancanti.scorrimento : $("#pannello-corpo").scrollTop,
   };
 }
 
@@ -193,6 +199,7 @@ async function ripristinaStato(r) {
   S.avanzataApplicata = r.avanzataApplicata;
   $("#cerca").value = r.cerca || "";
   S.trovati = new Set(r.trovati || []);
+  S.mancanti = { tipo: r.mancanti?.tipo || null, famiglia: r.mancanti?.famiglia || null, scorrimento: 0 };
   applicaClassi();
   if (r.ricompatta && S.isolamento && S.soloVisibili) ricompatta(true);
   if (r.disposizione && ctx.modifica) attivaDisposizione(true, { spiega: false });
@@ -205,6 +212,7 @@ async function ripristinaStato(r) {
   else if (p?.tipo === "esporta") mostraEsporta();
   else if (p?.tipo === "menu") mostraMenu();
   else if (p?.tipo === "postit") mostraTuttiPostit(ctx);
+  else if (p?.tipo === "mancanti") mostraMancanti();
   else if (p?.tipo === "storico" && ctx.modifica) await mostraStorico(ctx);
   if (S.pannello) $("#pannello-corpo").scrollTop = r.scorrimento || 0;
   avviso("Albero aggiornato alla versione nuova.");
@@ -331,6 +339,7 @@ function aggiornaPostit() {
   if (pan.persona) mostraPersona(ctx, pan.persona);
   else if (pan.unione) mostraUnione(ctx, pan.unione);
   else if (pan.tipo === "postit") mostraTuttiPostit(ctx);
+  else if (pan.tipo === "mancanti") mostraMancanti();
 }
 
 function isola(tipo, id) {
@@ -425,6 +434,91 @@ function mostraFiltri() {
     mostraFiltri();
     if (azione === "filtro" && S.dentro) inquadraVisibili();
   }, null, { tipo: "filtri" });
+}
+
+// ------------------------------------------------------------ cosa manca
+// Quello che non si sa, dalle generazioni più vecchie: chi ha il link di lettura tocca «Lo so io»
+// e manda il suggerimento già impostato, chi modifica tocca «Completa». L'elenco segue i dati e
+// i post-it; filtri per tipo di dato e per famiglia, con le date di nascita note per famiglia.
+const ORDINALI = ["Prima", "Seconda", "Terza", "Quarta", "Quinta", "Sesta", "Settima", "Ottava", "Nona", "Decima"];
+
+// centra sull'albero senza lasciare il pannello aperto
+function centraNodo(id, tipo) {
+  if (tipo === "persona") return seleziona(id, { centra: true, pannello: false });
+  S.sel = null;
+  S.selUnione = id;
+  applicaClassi();
+  const u = S.scena.unioni.find(x => x.id === id);
+  if (u) vista.centraSu(u.x, u.y, riserva());
+}
+
+function mostraMancanti() {
+  if (!S.scena) return;
+  const M = S.mancanti, ix = S.scena.ix;
+  const { voci, fasce, famiglie, totali } = cosaManca(S.albero, S.scena, S.postit);
+  const intere = new Map(voci.map(v => [v.nodo, v]));
+  const dellaFamiglia = scegli(voci, { famiglia: M.famiglia });
+  const mostrate = scegli(dellaFamiglia, { tipo: M.tipo });
+  const ceppo = cognome => ix.ceppi.get(cognome);
+  const colore = cognome => (ceppo(cognome) ? `--c:${ceppo(cognome).riempimento};--b:${ceppo(cognome).bordo}` : "--c:#fff;--b:#666");
+  const percento = (a, b) => (b ? Math.round((100 * a) / b) : 0);
+  const nomeFamiglia = cognome => (cognome === ALTRI ? "altri cognomi" : cognome);
+
+  const famiglieHtml = famiglie.map(f => `<button type="button" class="famiglia-manca${M.famiglia === f.cognome ? " attiva" : ""}" data-azione="famiglia" data-famiglia="${esc(f.cognome)}" style="${colore(f.cognome)}" aria-pressed="${M.famiglia === f.cognome}">
+      <span class="nome-famiglia">${esc(nomeFamiglia(f.cognome))}</span><span class="conto">${f.date} ${f.date === 1 ? "data" : "date"} su ${f.totale}</span>
+      <span class="avanzamento"><i style="width:${percento(f.date, f.totale)}%"></i></span></button>`).join("");
+  const quante = t => dellaFamiglia.filter(v => v.manca.some(m => m.tipo === t)).length;
+  const tipi = [[null, "Tutto", dellaFamiglia.length], ...TIPI.map(([t, testo]) => [t, testo, quante(t)])]
+    .map(([t, testo, n]) => `<button type="button" class="chip filtro${M.tipo === t ? " attiva" : ""}" data-azione="tipo" data-tipo="${t || ""}">${esc(testo)} · ${n}</button>`).join("");
+
+  const voce = v => {
+    const i = mostrate.indexOf(v), c = ceppo(v.famiglia);
+    const pallino = `<span class="pallino" style="background:${c?.riempimento || "#fff"};border-color:${c?.bordo || "#666"}${v.ignoto ? ";border-style:dashed" : ""}"></span>`;
+    const dati = v.manca.map(m => `<span class="dato-manca${m.attesa ? " in-attesa" : ""}">${esc(m.testo)}${m.attesa ? `<small>suggerito da ${esc(m.attesa)}</small>` : ""}</span>`).join("");
+    const postit = v.postit ? `<button type="button" class="collegamento" data-azione="postit" data-i="${i}">${v.postit} post-it</button>` : "";
+    return `<li class="voce-manca${v.manca.every(m => m.attesa) ? " coperta" : ""}">
+      <button type="button" class="nome-voce${v.ignoto ? " ignoto" : ""}" data-azione="vai" data-i="${i}" title="Mostra sull'albero">${pallino}<span>${esc(v.nome)}${v.morto ? " †" : ""}</span></button>
+      ${v.riconoscimento ? `<div class="riconosci">${esc(v.riconoscimento)}</div>` : ""}
+      <div class="riga-manca"><div class="dati-manca"><span class="etichetta">manca</span>${dati}</div>
+        <div class="azioni-voce">${postit}<button type="button" class="lo-so" data-azione="loso" data-i="${i}">${ctx.modifica ? "Completa" : "Lo so io"}</button></div></div></li>`;
+  };
+  const gruppi = new Map();
+  for (const v of mostrate) gruppi.set(v.g, [...(gruppi.get(v.g) || []), v]);
+  const sezioni = [...gruppi].map(([g, lista]) => {
+    const f = fasce.find(x => x.g === g);
+    const titolo = g === undefined ? "Fuori dalle generazioni" : `${ORDINALI[g] || `${g + 1}ª`} generazione`;
+    const sotto = f ? `${f.titolo}${f.anni ? `, ${f.anni}` : ""}` : "";
+    const nota = f?.stima && lista.some(v => v.manca.some(m => m.campo === "nascita"))
+      ? `<p class="nota-fascia">Il nome «${esc(f.titolo)}» è una stima: basta una data di nascita di questa generazione per renderlo certo.</p>` : "";
+    return `<section class="fascia-manca"><h3>${titolo}${sotto ? ` <span>· ${esc(sotto)}</span>` : ""}</h3>${nota}
+      <ul class="voci-manca">${lista.map(voce).join("")}</ul></section>`;
+  }).join("");
+  const vuoto = !voci.length ? "Non manca niente: l'albero è completo." : "Qui non manca niente.";
+  const soloFamiglia = M.famiglia ? `<p class="spiegazione">Solo ${M.famiglia === ALTRI ? "gli altri cognomi" : `la famiglia ${esc(M.famiglia)}`} · <button type="button" class="collegamento" data-azione="tutte-famiglie">tutte le famiglie</button></p>` : "";
+
+  apriPannello("Cosa manca", `<div class="mancanti">
+    <p class="spiegazione">${ctx.modifica
+      ? "Quello che ancora manca nell'albero, dalle generazioni più vecchie. «Completa» apre la scheda con il cursore sul dato. Chi ha il link di lettura vede lo stesso elenco e con «Lo so io» manda un suggerimento."
+      : "Qui c'è quello che ancora non sappiamo, cominciando dalle generazioni più vecchie. Se sai qualcosa, anche solo un anno, tocca «Lo so io»: chi cura l'albero vedrà il tuo suggerimento e lo aggiungerà."}</p>
+    <div class="riepilogo-manca"><p>Sappiamo la data di nascita di <b>${totali.date}</b> ${totali.date === 1 ? "persona" : "persone"} su <b>${totali.totale}</b>.</p>
+      <span class="avanzamento"><i style="width:${percento(totali.date, totali.totale)}%"></i></span></div>
+    <section><h3>Date di nascita per famiglia</h3><div class="famiglie-manca">${famiglieHtml}</div></section>
+    <div class="chips tipi-manca">${tipi}</div>
+    ${soloFamiglia}
+    ${sezioni || `<p class="vuoto">${vuoto}</p>`}</div>`, (azione, el) => {
+    if (azione === "tipo") { M.tipo = el.dataset.tipo || null; return mostraMancanti(); }
+    if (azione === "famiglia") { M.famiglia = M.famiglia === el.dataset.famiglia ? null : el.dataset.famiglia; return mostraMancanti(); }
+    if (azione === "tutte-famiglie") { M.famiglia = null; return mostraMancanti(); }
+    const v = mostrate[Number(el.dataset.i)];
+    if (!v) return;
+    if (azione === "vai") return centraNodo(v.nodo, v.tipo);
+    if (azione === "postit") return apriNodo(v.nodo, v.tipo, { centra: true, postit: true });
+    if (azione === "loso") {
+      M.scorrimento = $("#pannello-corpo").scrollTop;
+      const torna = () => { mostraMancanti(); $("#pannello-corpo").scrollTop = M.scorrimento; };
+      completaDaElenco(ctx, intere.get(v.nodo), { primo: v.manca[0]?.campo, torna });
+    }
+  }, null, { tipo: "mancanti" });
 }
 
 // ------------------------------------------------------------ ricerca
@@ -745,7 +839,7 @@ function chiediNome(obbligatorio = false) {
 function mostraMenu() {
   const modifica = ctx.modifica;
   apriPannello("Menu", `<div class="menu">
-    <section><h3>Questo link</h3><p>${modifica ? "Puoi <b>leggere e modificare</b>. Non inoltrarlo: per far vedere l'albero a qualcuno c'è il link in sola lettura." : "Puoi <b>leggere</b> l'albero e <b>suggerire modifiche</b>: apri la scheda di una persona o di una coppia e tocca «Suggerisci una modifica» per correggere un dato o aggiungere un parente, oppure lascia un post-it con le notizie che sai. Chi cura l'albero li vede e aggiorna l'albero; se lasci la tua email, ti avvisa quando il suggerimento viene accettato o rifiutato."}</p></section>
+    <section><h3>Questo link</h3><p>${modifica ? "Puoi <b>leggere e modificare</b>. Non inoltrarlo: per far vedere l'albero a qualcuno c'è il link in sola lettura." : "Puoi <b>leggere</b> l'albero e <b>suggerire modifiche</b>: apri la scheda di una persona o di una coppia e tocca «Suggerisci una modifica» per correggere un dato o aggiungere un parente, oppure lascia un post-it con le notizie che sai. Chi cura l'albero li vede e aggiorna l'albero; se lasci la tua email, ti avvisa quando il suggerimento viene accettato o rifiutato. In «Cosa manca» c'è l'elenco di quello che non sappiamo ancora."}</p></section>
     <section><h3>Il tuo nome</h3><p>${esc(memoria.leggi("nome") || "non indicato")} <button type="button" class="collegamento" data-azione="nome">cambia</button></p></section>
     ${modifica ? `<section><h3>Impostazioni dell'albero</h3>
       <label>Titolo <input name="titolo" value="${esc(S.albero.meta?.titolo || "")}"></label>
@@ -758,12 +852,14 @@ function mostraMenu() {
       <li>Tocca una persona per la sua scheda; da lì puoi isolarne antenati, discendenti, famiglia o generazione.</li>
       <li>I colori sono le famiglie d'origine: toccali nel nastro in alto per filtrare.</li>
       <li>Il pulsante a cursori nella casella di ricerca apre la ricerca avanzata: condizioni su tutti i campi, anche età e parentele, da combinare.</li>
+      <li><button type="button" class="collegamento" data-azione="manca">«Cosa manca»</button>, il pulsante con il punto di domanda, elenca date e nomi che non sappiamo ancora, dalle generazioni più vecchie: ${modifica ? "«Completa» apre la scheda sul dato che manca" : "se ne sai uno, tocca «Lo so io» e manda il suggerimento"}.</li>
       <li>Dalla scheda di una persona o di un'unione puoi lasciare un post-it, per esempio per suggerire una correzione: lo vedono tutti, e lo cambi o lo togli tu dallo stesso dispositivo${modifica ? ", oppure chiunque abbia il link di modifica" : ""}.</li>
       ${modifica ? "<li>«Disposizione» serve a sistemare il disegno: trascina le persone (con Alt anche i discendenti), tocca una linea per piegarla.</li><li>Ogni modifica finisce nello «Storico», da cui si può ripristinare.</li>" : ""}
       <li>† indica chi non è più in vita: lo si deduce dalla data di morte.</li>
     </ul></section>
     <section><h3>Questo dispositivo</h3><button type="button" class="pericolo" data-azione="dimentica">Dimentica l'albero su questo dispositivo</button></section>
   </div>`, async azione => {
+    if (azione === "manca") return mostraMancanti();
     if (azione === "nome") { await chiediNome(); mostraMenu(); }
     if (azione === "salva-impostazioni") {
       const c = $("#pannello-corpo");
@@ -914,6 +1010,7 @@ async function avvia() {
         if (pan && !pan.modulo && !document.querySelector("dialog[open]")) {
           if (pan.persona) mostraPersona(ctx, pan.persona);
           else if (pan.unione) mostraUnione(ctx, pan.unione);
+          else if (pan.tipo === "mancanti") mostraMancanti();
         }
         aggiornaEsitiAvanzata();
         aggiornaAttrezzi();
@@ -942,6 +1039,7 @@ async function avvia() {
   $("#b-filtri").addEventListener("click", () => (S.pannello?.tipo === "filtri" ? chiudiPannello() : mostraFiltri()));
   $("#b-avanzata").addEventListener("click", apriAvanzata);
   $("#b-postit").addEventListener("click", () => (S.pannello?.tipo === "postit" ? chiudiPannello() : mostraTuttiPostit(ctx)));
+  $("#b-manca").addEventListener("click", () => (S.pannello?.tipo === "mancanti" ? chiudiPannello() : mostraMancanti()));
   $("#b-esporta").addEventListener("click", () => (S.pannello?.tipo === "esporta" ? chiudiPannello() : mostraEsporta()));
   $("#b-menu").addEventListener("click", () => (S.pannello?.tipo === "menu" ? chiudiPannello() : mostraMenu()));
   $("#b-storico").addEventListener("click", () => mostraStorico(ctx));

@@ -1,2 +1,2 @@
 // Scritto da script/pubblica.sh: versione del codice pubblicato.
-export const VERSIONE = "20261108223827";
+export const VERSIONE = "20261108231027";
