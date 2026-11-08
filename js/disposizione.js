@@ -15,6 +15,7 @@ export function creaDisposizione(ctx) {
   const opzioni = { griglia: true, guide: true };
   let arcoSel = null, unioneSel = null;
   let trascinamento = null;
+  let archiAllInizio = {};       // le linee come erano quando si è aperta «Disposizione»
   const annullabili = [], ripetibili = [];
   let fotogramma = null;
 
@@ -215,6 +216,7 @@ export function creaDisposizione(ctx) {
 
   function clic(b) {
     if (!attivo) return false;
+    if (b.tipo === "maniglia") return true;      // un clic su un vertice lascia la linea selezionata
     arcoSel = b.tipo === "arco" ? b.id : null;
     unioneSel = b.tipo === "unione" ? b.id : null;
     disegnaManiglie();
@@ -235,6 +237,15 @@ export function creaDisposizione(ctx) {
   // ------------------------------------------------------------ comandi della barra
   function raddrizza() {
     if (arcoSel) registra([{ sezione: "archi", id: arcoSel, dopo: null }], "Raddrizzato un arco");
+  }
+
+  const lineaAttuale = id => ctx.albero().disposizione?.archi?.[id] ?? null;
+  const lineaCambiata = id => JSON.stringify(lineaAttuale(id)) !== JSON.stringify(archiAllInizio[id] ?? null);
+
+  function ripristinaLinea() {
+    if (arcoSel && lineaCambiata(arcoSel)) {
+      registra([{ sezione: "archi", id: arcoSel, dopo: archiAllInizio[arcoSel] ?? null }], "Riportato un arco com'era prima di questa sessione");
+    }
   }
 
   function riallinea() {
@@ -276,17 +287,19 @@ export function creaDisposizione(ctx) {
   function attiva(si) {
     attivo = si;
     arcoSel = null; unioneSel = null;
+    if (si) archiAllInizio = JSON.parse(JSON.stringify(ctx.albero()?.disposizione?.archi || {}));
     document.body.classList.toggle("in-disposizione", si);
     disegnaManiglie();
     disegnaGuide([]);
   }
 
   return {
-    attiva, prendi, trascina, clic, doppioClic, disegnaManiglie, annulla, ripeti, raddrizza, riallinea, ridisponi,
+    attiva, prendi, trascina, clic, doppioClic, disegnaManiglie, annulla, ripeti, raddrizza, ripristinaLinea, riallinea, ridisponi,
     get attivo() { return attivo; },
     opzioni,
     stato: () => ({
       arcoManuale: !!(arcoSel && ctx.albero().disposizione?.archi?.[arcoSel]),
+      arcoCambiato: !!(arcoSel && lineaCambiata(arcoSel)),
       arcoSel, unioneSpostata: !!(unioneSel && ctx.albero().disposizione?.nodi?.[unioneSel]),
       annullabile: annullabili.length > 0, ripetibile: ripetibili.length > 0,
     }),

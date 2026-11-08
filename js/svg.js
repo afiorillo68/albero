@@ -23,13 +23,14 @@ function testoRiquadro(n) {
   }).join("");
 }
 
-// Strati del disegno. interattivo: aggiunge data-* e le fasce larghe per cliccare gli archi.
+// Strati del disegno. interattivo: aggiunge data-* e le fasce larghe per cliccare gli archi;
+// le etichette delle fasce le mette la vista, fisse sul margine sinistro.
 export function strati(scena, { interattivo = false } = {}) {
   const fasce = scena.fasce.map(f => `<g class="fascia" data-g="${f.g}">`
     + `<rect x="${f.x}" y="${f.y}" width="${f.larghezza}" height="${f.altezza}" fill="${esc(f.sfondo)}"/>`
-    + `<text x="${f.x + 16}" y="${f.etichettaY - 8}" font-size="16" font-weight="600" fill="#444">${esc(f.titolo)}</text>`
-    + (f.anni ? `<text x="${f.x + 16}" y="${f.etichettaY + 12}" font-size="13" fill="#555">${esc(f.anni)}</text>` : "")
-    + (f.base ? `<text x="${f.x + 16}" y="${f.etichettaY + 30}" font-size="11" fill="#888" font-style="${f.stima ? "italic" : "normal"}">${esc(f.base)}</text>` : "")
+    + (interattivo ? "" : `<text x="${f.x + 16}" y="${f.etichettaY - 8}" font-size="16" font-weight="600" fill="#444">${esc(f.titolo)}</text>`
+      + (f.anni ? `<text x="${f.x + 16}" y="${f.etichettaY + 12}" font-size="13" fill="#555">${esc(f.anni)}</text>` : "")
+      + (f.base ? `<text x="${f.x + 16}" y="${f.etichettaY + 30}" font-size="11" fill="#888" font-style="${f.stima ? "italic" : "normal"}">${esc(f.base)}</text>` : ""))
     + `</g>`).join("");
 
   const archi = scena.archi.map(a => {

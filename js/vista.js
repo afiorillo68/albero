@@ -1,10 +1,11 @@
 // La vista: disegna la scena in SVG, gestisce spostamento e zoom (rotella, trackpad,
 // due dita), riconosce che cosa c'è sotto il puntatore e passa i trascinamenti a chi
 // li chiede (la modalità «Disposizione»). Solo browser.
-import { strati } from "./svg.js";
+import { strati, esc } from "./svg.js";
 
 const NS = "http://www.w3.org/2000/svg";
 const SOGLIA_CLIC = 5;           // pixel di movimento oltre i quali non è più un clic
+const DOPPIO_CLIC_MS = 350;      // due clic sullo stesso oggetto entro questo tempo
 
 export function creaVista(svg, gestori = {}) {
   const mondo = document.createElementNS(NS, "g");
@@ -17,11 +18,30 @@ export function creaVista(svg, gestori = {}) {
   }
   svg.append(mondo);
 
+  // intestazioni delle generazioni: fisse sul margine sinistro a ogni zoom, seguono solo in verticale
+  const testate = document.createElement("div");
+  testate.className = "testate";
+  testate.setAttribute("aria-hidden", "true");
+  svg.after(testate);
+  let righeTestate = [];
+
   let t = { x: 0, y: 0, k: 1 };
   let scena = null;
   const elementi = { persona: new Map(), unione: new Map(), arco: new Map() };
 
-  const applica = () => mondo.setAttribute("transform", `translate(${t.x} ${t.y}) scale(${t.k})`);
+  function posizionaTestate() {
+    for (const { el, f } of righeTestate) {
+      const alto = f.altezza * t.k;
+      el.style.transform = `translateY(${t.y + f.y * t.k}px)`;
+      el.style.height = `${alto}px`;
+      el.dataset.righe = alto < 34 ? 1 : alto < 58 ? 2 : 3;
+    }
+  }
+
+  const applica = () => {
+    mondo.setAttribute("transform", `translate(${t.x} ${t.y}) scale(${t.k})`);
+    posizionaTestate();
+  };
   const limitaK = k => Math.max(0.08, Math.min(4, k));
 
   function daSchermo(cx, cy) {
@@ -51,19 +71,19 @@ export function creaVista(svg, gestori = {}) {
     animazione = requestAnimationFrame(passo);
   }
 
-  // destra e basso: pixel coperti dal pannello, da lasciare fuori dall'inquadratura
-  function inquadra(box, { margine = 40, animato = true, kMax = 1.2, destra = 0, basso = 0 } = {}) {
+  // sinistra, destra e basso: pixel coperti da intestazioni e pannello, da lasciare fuori dall'inquadratura
+  function inquadra(box, { margine = 28, animato = true, kMax = 1.2, sinistra = 0, destra = 0, basso = 0 } = {}) {
     const r = svg.getBoundingClientRect();
-    const lw = Math.max(80, r.width - destra), lh = Math.max(80, r.height - basso);
+    const lw = Math.max(80, r.width - sinistra - destra), lh = Math.max(80, r.height - basso);
     const w = Math.max(1, box.x2 - box.x), h = Math.max(1, box.y2 - box.y);
     const k = limitaK(Math.min((lw - 2 * margine) / w, (lh - 2 * margine) / h, kMax));
-    const dest = { k, x: (lw - w * k) / 2 - box.x * k, y: (lh - h * k) / 2 - box.y * k };
+    const dest = { k, x: sinistra + (lw - w * k) / 2 - box.x * k, y: (lh - h * k) / 2 - box.y * k };
     if (animato) animaVerso(dest); else { t = dest; applica(); gestori.suZoom?.(t.k); }
   }
 
-  function centraSu(x, y, { k = t.k, destra = 0, basso = 0 } = {}) {
+  function centraSu(x, y, { k = t.k, sinistra = 0, destra = 0, basso = 0 } = {}) {
     const r = svg.getBoundingClientRect();
-    animaVerso({ k, x: (r.width - destra) / 2 - x * k, y: (r.height - basso) / 2 - y * k });
+    animaVerso({ k, x: sinistra + (r.width - sinistra - destra) / 2 - x * k, y: (r.height - basso) / 2 - y * k });
   }
 
   function disegna(nuova) {
@@ -77,6 +97,13 @@ export function creaVista(svg, gestori = {}) {
     for (const el of strato.nodi.querySelectorAll("[data-persona]")) elementi.persona.set(el.dataset.persona, el);
     for (const el of strato.unioni.querySelectorAll("[data-unione]")) elementi.unione.set(el.dataset.unione, el);
     for (const el of strato.archi.querySelectorAll("[data-arco]")) elementi.arco.set(el.dataset.arco, el);
+    testate.innerHTML = scena.fasce.map(f => `<div class="testata" style="--sfondo:${esc(f.sfondo)}">`
+      + `<span class="titolo">${esc(f.titolo)}</span>`
+      + (f.anni ? `<span class="anni">${esc(f.anni)}</span>` : "")
+      + (f.base ? `<span class="base${f.stima ? " stima" : ""}">${esc(f.base)}</span>` : "")
+      + `</div>`).join("");
+    righeTestate = [...testate.children].map((el, i) => ({ el, f: scena.fasce[i] }));
+    posizionaTestate();
   }
 
   // classi: {selezionata, unioneSelezionata, arcoSelezionato, attenuati: Set, nascosti: Set, evidenziati: Set}
@@ -170,24 +197,35 @@ export function creaVista(svg, gestori = {}) {
     }
   });
 
+  // Il doppio clic si riconosce qui e non con l'evento dblclick: con la cattura del puntatore
+  // il browser lo manda alla tela invece che al vertice, e sul telefono non arriva affatto.
+  const chiave = b => `${b.tipo}|${b.id ?? ""}|${b.maniglia ?? ""}|${b.indice ?? ""}`;
+  let ultimoClic = null;
+
+  function clicOdoppio(b, e) {
+    const ora = performance.now(), m = daSchermo(e.clientX, e.clientY);
+    const u = ultimoClic;
+    if (u && u.chiave === chiave(b) && ora - u.ora < DOPPIO_CLIC_MS && Math.hypot(e.clientX - u.x, e.clientY - u.y) < 12) {
+      ultimoClic = null;
+      if (!gestori.doppioClic?.(b, m, e) && b.tipo === "vuoto") zoomIn({ x: e.clientX, y: e.clientY }, 1.6);
+      return;
+    }
+    ultimoClic = { chiave: chiave(b), ora, x: e.clientX, y: e.clientY };
+    gestori.clic?.(b, m, e);
+  }
+
   function fine(e) {
     if (!puntatori.has(e.pointerId)) return;
     puntatori.delete(e.pointerId);
     if (!gesto) return;
     if (gesto.tipo === "pizzica") { if (puntatori.size === 0) gesto = null; return; }
     if (gesto.tipo === "trascina" && gesto.mosso) gestori.trascina?.("fine", daSchermo(e.clientX, e.clientY), e, gesto.b);
-    else if (!gesto.mosso && e.type === "pointerup") gestori.clic?.(gesto.b, daSchermo(e.clientX, e.clientY), e);
+    else if (!gesto.mosso && e.type === "pointerup") clicOdoppio(gesto.b, e);
     svg.classList.remove("in-movimento");
     gesto = null;
   }
   svg.addEventListener("pointerup", fine);
   svg.addEventListener("pointercancel", fine);
-
-  svg.addEventListener("dblclick", e => {
-    const b = bersaglio(e.target);
-    if (gestori.doppioClic?.(b, daSchermo(e.clientX, e.clientY), e)) return;
-    if (b.tipo === "vuoto") zoomIn({ x: e.clientX, y: e.clientY }, 1.6);
-  });
 
   svg.addEventListener("wheel", e => {
     e.preventDefault();
@@ -206,6 +244,7 @@ export function creaVista(svg, gestori = {}) {
     disegna, classi, inquadra, centraSu, daSchermo,
     zoom: f => zoomIn(null, f),
     scala: () => t.k,
+    larghezzaTestate: () => (righeTestate.length ? testate.offsetWidth : 0),
     strato,
     elemento: (tipo, id) => elementi[tipo].get(id),
   };

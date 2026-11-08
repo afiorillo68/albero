@@ -130,28 +130,32 @@ function applicaClassi() {
   aggiornaNastro();
 }
 
-// Spazio coperto dal pannello aperto: a destra sullo schermo largo, in basso sul telefono.
+// Spazio coperto da intestazioni delle generazioni (a sinistra) e pannello aperto
+// (a destra sullo schermo largo, in basso sul telefono).
 function riserva() {
+  const sinistra = vista.larghezzaTestate();
   const p = $("#pannello");
-  if (p.hidden) return { destra: 0, basso: 0 };
+  if (p.hidden) return { sinistra, destra: 0, basso: 0 };
   const r = p.getBoundingClientRect(), area = $("#tela").getBoundingClientRect();
-  return innerWidth > 760 ? { destra: Math.max(0, area.right - r.left + 10), basso: 0 } : { destra: 0, basso: Math.max(0, area.bottom - r.top) };
+  return innerWidth > 760 ? { sinistra, destra: Math.max(0, area.right - r.left + 10), basso: 0 } : { sinistra, destra: 0, basso: Math.max(0, area.bottom - r.top) };
 }
 
-// Inquadra un gruppo di persone. Senza kMax non si avvicina oltre lo zoom attuale:
-// ricerca, filtri e isolamento allargano la vista se serve, ma non la stringono.
-function inquadraPersone(ids, { animato = true, kMax = vista.scala() } = {}) {
+const ZOOM_PIENO = 1.2;          // inquadrando non si va oltre i riquadri a grandezza piena
+const ingombro = nodi => ({ x: Math.min(...nodi.map(n => n.x)), y: Math.min(...nodi.map(n => n.y)),
+  x2: Math.max(...nodi.map(n => n.x + W)), y2: Math.max(...nodi.map(n => n.y + H)) });
+
+// Inquadra un gruppo di persone stretto, con un piccolo margine. Si avvicina fino alla
+// grandezza piena, o fino allo zoom attuale se è già più vicino: mai oltre.
+function inquadraPersone(ids, { animato = true, kMax = Math.max(ZOOM_PIENO, vista.scala()) } = {}) {
   const nodi = S.scena.nodi.filter(n => ids.has(n.id));
   if (!nodi.length) return;
-  const box = { x: Math.min(...nodi.map(n => n.x)) - 30, y: Math.min(...nodi.map(n => n.y)) - 30,
-    x2: Math.max(...nodi.map(n => n.x + W)) + 30, y2: Math.max(...nodi.map(n => n.y + H)) + 30 };
-  vista.inquadra(box, { animato, kMax, ...riserva() });
+  vista.inquadra(ingombro(nodi), { animato, kMax, ...riserva() });
 }
 
 function inquadraVisibili(opzioni = {}) {
   if (!S.scena) return;
   if (S.dentro) inquadraPersone(S.dentro, opzioni);
-  else vista.inquadra(S.scena.bbox, { animato: opzioni.animato ?? true, kMax: opzioni.kMax ?? 1.2, ...riserva() });
+  else if (S.scena.nodi.length) vista.inquadra(ingombro(S.scena.nodi), { animato: opzioni.animato ?? true, kMax: opzioni.kMax ?? ZOOM_PIENO, ...riserva() });
 }
 
 // ------------------------------------------------------------ selezione e isolamento
@@ -267,7 +271,7 @@ function preparaRicerca() {
       return `<li data-id="${esc(p.id)}" class="${i === scelto ? "scelto" : ""}"><span class="pallino" style="background:${c?.riempimento || "#fff"};border-color:${c?.bordo || "#666"}"></span>${esc(nomeCompleto(p))}${statoInVita(p) === "no" ? " †" : ""}${anni}</li>`;
     }).join("");
   };
-  // mentre si scrive, i risultati si evidenziano e la vista ne inquadra l'area (mai più vicino di ora)
+  // mentre si scrive, i risultati si evidenziano e la vista li inquadra
   let attesa = null;
   const segna = tutti => {
     S.trovati = new Set(tutti.map(p => p.id));
@@ -439,6 +443,8 @@ function aggiornaAttrezzi() {
   b.querySelector("[data-attrezzo=annulla]").disabled = !st.annullabile;
   b.querySelector("[data-attrezzo=ripeti]").disabled = !st.ripetibile;
   b.querySelector("[data-attrezzo=raddrizza]").disabled = !st.arcoManuale;
+  b.querySelector("[data-attrezzo=ripristina-linea]").disabled = !st.arcoCambiato;
+  $("#suggerimento-linea").hidden = !st.arcoSel;
   b.querySelector("[data-attrezzo=riallinea]").disabled = !st.unioneSpostata;
   b.querySelector("[data-attrezzo=griglia]").classList.toggle("attiva", disposizione.opzioni.griglia);
   b.querySelector("[data-attrezzo=guide]").classList.toggle("attiva", disposizione.opzioni.guide);
@@ -452,6 +458,7 @@ function preparaAttrezzi() {
     if (a === "annulla") disposizione.annulla();
     if (a === "ripeti") disposizione.ripeti();
     if (a === "raddrizza") disposizione.raddrizza();
+    if (a === "ripristina-linea") disposizione.ripristinaLinea();
     if (a === "riallinea") disposizione.riallinea();
     if (a === "ridisponi") {
       const solo = S.dentro && S.dentro.size < S.albero.persone.length;
@@ -531,7 +538,7 @@ async function avvia() {
         if (S.primoDisegno) {
           S.primoDisegno = false;
           $("#avvio").hidden = true;
-          inquadraVisibili({ animato: false, kMax: 1.2 });
+          inquadraVisibili({ animato: false, kMax: ZOOM_PIENO });
         }
         // la scheda aperta segue le modifiche degli altri, ma non mentre la si compila
         const pan = S.pannello;
@@ -569,7 +576,7 @@ async function avvia() {
   $("#b-disposizione").addEventListener("click", () => attivaDisposizione(!disposizione.attivo));
   $("#z-piu").addEventListener("click", () => vista.zoom(1.25));
   $("#z-meno").addEventListener("click", () => vista.zoom(0.8));
-  $("#z-adatta").addEventListener("click", () => inquadraVisibili({ kMax: 1.2 }));
+  $("#z-adatta").addEventListener("click", () => inquadraVisibili({ kMax: ZOOM_PIENO }));
 
   document.addEventListener("keydown", e => {
     const inCampo = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || document.querySelector("dialog[open]");
