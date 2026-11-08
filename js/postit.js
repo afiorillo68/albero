@@ -1,9 +1,12 @@
 // Post-it sulle persone e sulle unioni: li aggiunge chiunque abbia il link, anche in sola
 // lettura (per esempio per suggerire una correzione); li cambia o li toglie chi li ha
-// scritti, dallo stesso browser, oppure chi ha il link di modifica. Solo browser; riceve
-// il contesto dell'app da main.js.
+// scritti, dallo stesso browser, oppure chi ha il link di modifica. Un suggerimento è un
+// post-it con la modifica proposta, che chi modifica applica dal modulo già compilato.
+// Solo browser; riceve il contesto dell'app da main.js.
 import { esc } from "./svg.js";
 import { nomeCompleto } from "./grafo.js";
+import { descriviProposta } from "./proposte.js";
+import { suggerisci, modificaSuggerimento, applicaSuggerimento } from "./scheda.js";
 
 const MASSIMO = 2000;            // caratteri, come nelle regole di Firestore
 const ms = ts => (ts?.toMillis ? ts.toMillis() : Date.now());     // in attesa del server: adesso
@@ -22,29 +25,42 @@ function nomeNodo(ctx, n) {
   return u ? `Unione fra ${u.partner.map(p => nomeCompleto(ix.persona.get(p))).join(" e ")}` : null;
 }
 
+// chi modifica applica i suggerimenti; gli altri comandi come per ogni post-it
+function comandi(ctx, n) {
+  const b = (azione, testo) => `<button type="button" class="collegamento" data-azione="${azione}" data-postit="${esc(n.id)}">${testo}</button>`;
+  if (ctx.modifica && n.proposta) return `<span class="comandi-postit">${b("postit-applica", "applica…")}${b("postit-togli", "togli")}</span>`;
+  return mio(ctx, n) ? `<span class="comandi-postit">${b("postit-modifica", "modifica")}${b("postit-togli", "togli")}</span>` : "";
+}
+
 function biglietto(ctx, n) {
   const altro = n.modificatoDa && n.modificatoDa !== n.autore ? ` · modificato da ${esc(n.modificatoDa)}` : "";
-  const comandi = mio(ctx, n) ? `<span class="comandi-postit">
-      <button type="button" class="collegamento" data-azione="postit-modifica" data-postit="${esc(n.id)}">modifica</button>
-      <button type="button" class="collegamento" data-azione="postit-togli" data-postit="${esc(n.id)}">togli</button></span>` : "";
-  return `<div class="biglietto"><p>${testoNote(n.testo)}</p>
-    <div class="firma"><span>${esc(n.autore)}, ${esc(quando(n.creato))}${altro}</span>${comandi}</div></div>`;
+  let corpo = `<p>${testoNote(n.testo)}</p>`;
+  if (n.proposta) {
+    const { titolo, righe } = descriviProposta(ctx.indici(), n);
+    corpo = `<div class="testa-suggerimento"><span class="marchio-suggerimento">Suggerimento</span> ${esc(titolo)}</div>
+      ${righe.length ? `<ul class="proposta">${righe.map(r => `<li>${esc(r)}</li>`).join("")}</ul>` : ""}
+      ${n.testo ? `<p class="commento">${testoNote(n.testo)}</p>` : ""}`;
+  }
+  return `<div class="biglietto${n.proposta ? " suggerimento" : ""}">${corpo}
+    <div class="firma"><span>${esc(n.autore)}, ${esc(quando(n.creato))}${altro}</span>${comandi(ctx, n)}</div></div>`;
 }
 
 // Invito sopra i post-it: chi legge è il familiare che sa qualcosa; chi modifica li smaltisce.
 const INVITO = {
-  persona: "Se sai la data o il luogo di nascita, un soprannome o altre notizie su questa persona, scrivile in un post-it: l'albero verrà aggiornato appena possibile.",
-  unione: "Se sai quando e dove si sono sposati, se hanno altri figli o altre notizie su questa coppia, scrivile in un post-it: l'albero verrà aggiornato appena possibile.",
-  modifica: "Qui i familiari lasciano notizie e correzioni. Quando hai aggiornato l'albero, togli il post-it.",
+  persona: "Se sai la data o il luogo di nascita, un soprannome o altre notizie su questa persona, scrivile in un post-it. Se manca un parente o un dato è sbagliato, suggerisci la modifica: l'albero verrà aggiornato appena possibile.",
+  unione: "Se sai quando e dove si sono sposati o altre notizie su questa coppia, scrivile in un post-it. Se manca un figlio o un dato è sbagliato, suggerisci la modifica: l'albero verrà aggiornato appena possibile.",
+  modifica: "Qui i familiari lasciano notizie, correzioni e suggerimenti. «Applica» apre la modifica già compilata: la controlli, la salvi e il suggerimento sparisce. Quando hai aggiornato l'albero da un post-it, toglilo.",
 };
 
 // Sezione per la scheda di una persona o di un'unione (tipo: "persona" | "unione").
 export function sezionePostit(ctx, nodo, tipo) {
   const note = postitDi(ctx, nodo);
-  return `<section class="sezione-postit" id="postit-scheda"><h3>Post-it${note.length ? ` · ${note.length}` : ""}</h3>
+  const suggerisci = ctx.modifica ? ""
+    : `<button type="button" class="aggiungi-postit suggerisci" data-azione="postit-suggerisci">✎ Suggerisci una modifica</button>`;
+  return `<section class="sezione-postit" id="postit-scheda"><h3>Post-it e suggerimenti${note.length ? ` · ${note.length}` : ""}</h3>
     <p class="spiegazione">${esc(INVITO[ctx.modifica ? "modifica" : tipo])}</p>
     ${note.map(n => biglietto(ctx, n)).join("")}
-    <button type="button" class="aggiungi-postit" data-azione="postit-aggiungi">+ Aggiungi un post-it</button></section>`;
+    <div class="aggiungi-due"><button type="button" class="aggiungi-postit" data-azione="postit-aggiungi">+ Aggiungi un post-it</button>${suggerisci}</div></section>`;
 }
 
 export const azioneDiPostit = azione => azione?.startsWith("postit-");
@@ -69,6 +85,7 @@ function scrivi(ctx, titolo, iniziale = "") {
 // Esegue le azioni «postit-…» di schede e pannello. nodo: {nodo, tipo} per l'aggiunta.
 export async function gestisciPostit(ctx, azione, el, nodo = null) {
   try {
+    if (azione === "postit-suggerisci" && nodo) return await suggerisci(ctx, nodo.nodo, nodo.tipo);
     if (azione === "postit-aggiungi" && nodo) {
       const dove = nomeNodo(ctx, nodo) || "questo riquadro";
       const testo = await scrivi(ctx, `Post-it su ${dove}`);
@@ -78,13 +95,16 @@ export async function gestisciPostit(ctx, azione, el, nodo = null) {
     }
     const n = ctx.postit().find(x => x.id === el?.dataset.postit);
     if (!n) return;
+    if (azione === "postit-applica" && n.proposta) return await applicaSuggerimento(ctx, n);
+    if (azione === "postit-modifica" && n.proposta) return await modificaSuggerimento(ctx, n);
     if (azione === "postit-modifica") {
       const testo = await scrivi(ctx, "Modifica il post-it", n.testo);
       if (!testo || testo === n.testo || !await ctx.nomeAutore()) return;
       await ctx.attendiPoco(ctx.dati().modificaPostit(n.id, testo));
     }
     if (azione === "postit-togli") {
-      if (!await ctx.conferma("Tolgo questo post-it? Sparisce per tutti e non si può recuperare.", "Togli", true)) return;
+      const cosa = n.proposta ? "questo suggerimento" : "questo post-it";
+      if (!await ctx.conferma(`Tolgo ${cosa}? Sparisce per tutti e non si può recuperare.`, "Togli", true)) return;
       await ctx.attendiPoco(ctx.dati().togliPostit(n.id));
     }
   } catch (err) { ctx.errore(err); }
@@ -106,7 +126,7 @@ export function mostraTuttiPostit(ctx) {
     return `<section class="gruppo-postit">${testa}${note.map(n => biglietto(ctx, n)).join("")}</section>`;
   }).join("");
   ctx.apriPannello("Post-it", `<div class="tutti-postit">
-    <p class="spiegazione">Per aggiungerne uno apri la scheda di una persona o di un'unione. I riquadri con un post-it hanno un bollino giallo.</p>
+    <p class="spiegazione">Per aggiungere un post-it o suggerire una modifica apri la scheda di una persona o di un'unione. I riquadri con un post-it o un suggerimento hanno un bollino giallo.</p>
     ${blocchi || `<p class="vuoto">Nessun post-it, per ora.</p>`}</div>`, (azione, el) => {
     if (azione === "vai-nodo") return ctx.apriNodo(el.dataset.nodo, el.dataset.tipo, { centra: true });
     if (azioneDiPostit(azione)) return gestisciPostit(ctx, azione, el);

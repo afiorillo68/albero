@@ -89,6 +89,7 @@ export async function apri(configurazione, chiave, { suCambio, suErrore, suStato
   }, suErrore);
 
   const modifiche = collection(db, "alberi", kL, "modifiche");
+  const postit = collection(db, "alberi", kL, "postit");
   const attuale = (raccolta, id) => {
     const v = stato[raccolta].get(id);
     return v ? senzaId(v) : null;
@@ -97,7 +98,8 @@ export async function apri(configurazione, chiave, { suCambio, suErrore, suStato
   // operazioni: [{raccolta: "persone"|"unioni", id, dopo: {...} | null}]
   // disposizione: [{sezione: "nodi"|"archi", id, dopo: valore | null}]
   // meta: {campo: valore}
-  async function salva({ operazioni = [], disposizione = [], meta = null, descrizione }) {
+  // applicati: [id] dei suggerimenti applicati, che spariscono insieme alla modifica
+  async function salva({ operazioni = [], disposizione = [], meta = null, applicati = [], descrizione }) {
     if (!modifica) throw new Error("Questo link è in sola lettura.");
     const chi = nome() || "qualcuno";
     const batch = writeBatch(db);
@@ -126,6 +128,7 @@ export async function apri(configurazione, chiave, { suCambio, suErrore, suStato
       batch.update(radice, meta);
       voce({ tipo: "meta", prima, dopo: meta });
     }
+    for (const id of applicati) batch.delete(doc(postit, id));
     await batch.commit();
   }
 
@@ -152,7 +155,7 @@ export async function apri(configurazione, chiave, { suCambio, suErrore, suStato
 
   // Post-it: li legge e li aggiunge chiunque abbia il link; li cambia o li toglie chi li ha
   // scritti, dallo stesso browser, oppure chi ha il link di modifica (lo controllano le regole).
-  const postit = collection(db, "alberi", kL, "postit");
+  // Un suggerimento è un post-it con la modifica proposta (proposte.js).
   onSnapshot(postit, s => suPostit?.(s.docs.map(d => ({ id: d.id, ...d.data() }))),
     err => console.warn("Post-it non leggibili:", err));
 
@@ -162,14 +165,14 @@ export async function apri(configurazione, chiave, { suCambio, suErrore, suStato
   }
   const firma = () => (nome() || "qualcuno").slice(0, 60);
 
-  async function aggiungiPostit({ nodo, tipo, testo }) {
+  async function aggiungiPostit({ nodo, tipo, testo, proposta }) {
     const io = await identita();
-    await addDoc(postit, { nodo, tipo, testo, autore: firma(), uid: io, creato: serverTimestamp(), aggiornato: serverTimestamp() });
+    await addDoc(postit, { nodo, tipo, testo, proposta, autore: firma(), uid: io, creato: serverTimestamp(), aggiornato: serverTimestamp() });
   }
 
-  async function modificaPostit(id, testo) {
+  async function modificaPostit(id, testo, proposta) {
     await identita();
-    await updateDoc(doc(postit, id), { testo, modificatoDa: firma(), aggiornato: serverTimestamp() });
+    await updateDoc(doc(postit, id), { testo, proposta, modificatoDa: firma(), aggiornato: serverTimestamp() });
   }
 
   async function togliPostit(id) {

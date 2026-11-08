@@ -327,6 +327,19 @@ select[size] { padding: 4px !important; }
   width: 100%; padding: 9px 12px; border: 1.5px dashed #d9c25a; border-radius: 10px; background: #fffbe0; color: #5c4a00; cursor: pointer; font-size: 14px;
 }
 .aggiungi-postit:hover { background: #fff4a8; }
+.aggiungi-due { display: flex; flex-wrap: wrap; gap: 8px; }
+.aggiungi-due > .aggiungi-postit { flex: 1 1 180px; width: auto; }
+.aggiungi-postit.suggerisci { border-color: #8fbf9f; background: #eef7f1; color: #24543a; }
+.aggiungi-postit.suggerisci:hover { background: #dff0e5; }
+.biglietto.suggerimento { background: #e8f4ec; border-color: #a9cdb5; box-shadow: 0 2px 5px rgba(20, 90, 50, .12); }
+.biglietto.suggerimento .firma { color: #2f5e40; }
+.biglietto.richiamo { transform: none; margin-bottom: 12px; }
+.biglietto.richiamo .spiegazione { margin: 4px 0 0; }
+.testa-suggerimento { font-weight: 600; line-height: 1.4; margin-bottom: 4px; }
+.marchio-suggerimento { display: inline-block; margin-right: 4px; padding: 1px 6px; border-radius: 6px; background: #2f7a4c; color: #fff; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; vertical-align: 1px; }
+.biglietto .proposta { margin: 4px 0 6px; padding-left: 18px; line-height: 1.45; }
+.biglietto .commento { font-style: italic; }
+.facoltativo { color: var(--tenue); font-size: 12px; font-weight: 400; }
 .gruppo-postit { margin-top: 18px; }
 .titolo-postit { display: inline-block; margin-bottom: 8px; font-size: 14px; font-weight: 600; }
 .titolo-postit.tolto { color: var(--tenue); font-style: italic; font-weight: 400; }

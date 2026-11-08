@@ -1,11 +1,16 @@
 // Scheda della persona e dell'unione: lettura, modifica, relazioni (partner, figli,
-// genitori), eliminazione. Solo browser; riceve il contesto dell'app da main.js.
+// genitori), eliminazione, suggerimenti. Solo browser; riceve il contesto dell'app da main.js.
+//
+// Suggerimenti: chi ha il link di lettura usa gli stessi moduli di chi modifica, che invece
+// di salvare mandano la proposta in un post-it (opz.suggerisci). Chi modifica la applica dallo
+// stesso modulo già compilato (opz.applica è il post-it, che sparisce insieme alla modifica).
 import { esc } from "./svg.js";
 import { parenti, nomeCompleto, cerca, coniugeIn, ignoto } from "./grafo.js";
 import { normalizzaData, formattaData, statoInVita, TESTO_IN_VITA, eta, annoDi, generazioneSociologica } from "./deduzioni.js";
 import { collocaNuova } from "./geometria.js";
 import { idArcoPartner, idArcoFiglio, NEUTRO } from "./scena.js";
 import { sezionePostit, gestisciPostit, azioneDiPostit } from "./postit.js";
+import { CAMPI_PERSONA, CAMPI_UNIONE, MISURE, differenze } from "./proposte.js";
 
 // ------------------------------------------------------------ utilità
 
@@ -13,12 +18,12 @@ const vuotaData = () => ({ data: "", circa: false, luogo: "" });
 const casuale = () => Math.random().toString(36).slice(2, 6);
 const slug = s => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-export function nuovaPersona(albero, { nome = "", cognome = "" } = {}) {
+export function nuovaPersona(albero, { nome = "", cognome = "", nascita = null } = {}) {
   const base = [slug(cognome), slug(nome)].filter(Boolean).join("-") || "persona";
   return {
     id: `${base}-${casuale()}`, ordine: Math.max(-1, ...albero.persone.map(p => p.ordine ?? 0)) + 1,
     cognome: cognome.trim(), nome: nome.trim(), soprannome: "", sesso: "", segnaposto: false,
-    nascita: vuotaData(), morte: vuotaData(), deceduto: false, note: "",
+    nascita: { ...vuotaData(), ...(nascita || {}) }, morte: vuotaData(), deceduto: false, note: "",
   };
 }
 
@@ -40,6 +45,22 @@ function chip(ctx, id) {
 }
 
 const testoNote = s => esc(s).replace(/\n/g, "<br>");
+
+const suSuggerimento = (descrizione, n) => (n ? `${descrizione}, su suggerimento di ${n.autore}` : descrizione);
+const applicati = n => (n ? [n.id] : []);
+const verbo = opz => (opz.suggerisci ? "Suggerisci" : "Aggiungi");
+const pulsante = (opz, normale) => (opz.suggerisci ? "Invia il suggerimento" : normale);
+const personaScelta = s => (s.id ? { persona: s.id } : { nuova: s.nuova });
+
+// In cima al modulo di chi applica: chi ha suggerito e che cosa ha scritto.
+function richiamo(n) {
+  if (!n) return "";
+  return `<div class="biglietto suggerimento richiamo"><b>Suggerimento di ${esc(n.autore)}</b>${n.testo ? `<p>${testoNote(n.testo)}</p>` : ""}
+    <p class="spiegazione">Il modulo è già compilato: controlla, correggi se serve e salva. Il suggerimento sparisce con il salvataggio.</p></div>`;
+}
+
+const campoCommento = (valore = "") => `<label>Come lo sai? <span class="facoltativo">facoltativo</span>
+  <textarea name="commento" rows="3" maxlength="2000" placeholder="Per esempio: me l'ha detto la zia; c'è scritto sul certificato">${esc(valore)}</textarea></label>`;
 
 // ------------------------------------------------------------ scheda della persona
 
@@ -120,17 +141,23 @@ export function mostraPersona(ctx, id) {
 
 // ------------------------------------------------------------ modulo della persona
 
-export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null } = {}) {
-  const p = nuova || ctx.indici().persona.get(id);
-  const versione = ms(p.aggiornato?.quando);
+// opz.iniziale: campi che coprono quelli della scheda (proposta da modificare o da applicare)
+export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null, iniziale = null, suggerisci = null, commento = "", applica = null } = {}) {
+  const attuale = nuova || ctx.indici().persona.get(id);
+  if (!attuale) return ctx.avviso("Questa persona non è più nell'albero.");
+  const p = iniziale ? { ...attuale, ...iniziale } : attuale;
+  const versione = ms(attuale.aggiornato?.quando);
+  const lungo = n => ` maxlength="${n}"`;
   const html = `
     <form class="modulo" novalidate>
+      ${richiamo(applica)}
+      ${suggerisci ? `<p class="spiegazione">Correggi o completa quello che sai. Chi cura l'albero vedrà la tua proposta e la applicherà.</p>` : ""}
       <div class="due">
-        <label>Nome <input name="nome" value="${esc(p.nome)}" autocomplete="off"></label>
-        <label>Cognome <input name="cognome" value="${esc(p.cognome)}" autocomplete="off"></label>
+        <label>Nome <input name="nome" value="${esc(p.nome)}" autocomplete="off"${lungo(MISURE.nome)}></label>
+        <label>Cognome <input name="cognome" value="${esc(p.cognome)}" autocomplete="off"${lungo(MISURE.nome)}></label>
       </div>
       <div class="due">
-        <label>Soprannome <input name="soprannome" value="${esc(p.soprannome)}" autocomplete="off"></label>
+        <label>Soprannome <input name="soprannome" value="${esc(p.soprannome)}" autocomplete="off"${lungo(MISURE.nome)}></label>
         <label>Sesso <select name="sesso">
           <option value="">non indicato</option>
           <option value="F"${p.sesso === "F" ? " selected" : ""}>femmina</option>
@@ -143,7 +170,7 @@ export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null 
           <input name="nascita" value="${esc(dataInIngresso(p.nascita))}" placeholder="gg/mm/aaaa, mm/aaaa o aaaa" inputmode="numeric">
           <label class="spunta"><input type="checkbox" name="nascitaCirca"${p.nascita?.circa ? " checked" : ""}> circa</label>
         </div>
-        <input name="nascitaLuogo" value="${esc(p.nascita?.luogo)}" placeholder="luogo">
+        <input name="nascitaLuogo" value="${esc(p.nascita?.luogo)}" placeholder="luogo"${lungo(MISURE.luogo)}>
       </fieldset>
       <fieldset>
         <legend>Morte</legend>
@@ -151,17 +178,20 @@ export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null 
           <input name="morte" value="${esc(dataInIngresso(p.morte))}" placeholder="gg/mm/aaaa, mm/aaaa o aaaa" inputmode="numeric">
           <label class="spunta"><input type="checkbox" name="morteCirca"${p.morte?.circa ? " checked" : ""}> circa</label>
         </div>
-        <input name="morteLuogo" value="${esc(p.morte?.luogo)}" placeholder="luogo">
+        <input name="morteLuogo" value="${esc(p.morte?.luogo)}" placeholder="luogo"${lungo(MISURE.luogo)}>
         <label class="spunta"><input type="checkbox" name="deceduto"${p.deceduto ? " checked" : ""}> Non è più in vita, ma la data non si sa</label>
       </fieldset>
-      <label>Note <textarea name="note" rows="6" placeholder="Ricordi, mestiere, dove ha vissuto, da chi viene l'informazione…">${esc(p.note)}</textarea></label>
+      <label>Note <textarea name="note" rows="6" placeholder="Ricordi, mestiere, dove ha vissuto, da chi viene l'informazione…"${suggerisci ? lungo(MISURE.note) : ""}>${esc(p.note)}</textarea></label>
+      ${suggerisci ? campoCommento(commento) : ""}
       <p class="errore" hidden></p>
       <div class="azioni">
-        <button type="submit" class="primario">Salva</button>
+        <button type="submit" class="primario">${pulsante({ suggerisci }, "Salva")}</button>
         <button type="button" data-azione="annulla">Annulla</button>
       </div>
     </form>`;
-  ctx.apriPannello(nuova ? "Persona nuova" : `Modifica: ${nomeCompleto(p)}`, html, azione => {
+  const titolo = suggerisci ? `Suggerisci: ${nomeCompleto(attuale)}` : applica ? `Applica: ${nomeCompleto(attuale)}`
+    : nuova ? "Persona nuova" : `Modifica: ${nomeCompleto(attuale)}`;
+  ctx.apriPannello(titolo, html, azione => {
     if (azione === "annulla") (nuova ? ctx.chiudiPannello() : mostraPersona(ctx, id));
   }, corpo => {
     const f = corpo.querySelector("form");
@@ -170,17 +200,10 @@ export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null 
       e.preventDefault();
       const v = n => f.elements[n].value;
       const errore = f.querySelector(".errore");
+      const segnala = testo => { errore.textContent = testo; errore.hidden = false; };
       const nascita = normalizzaData(v("nascita")), morte = normalizzaData(v("morte"));
-      if (!nascita.valida || !morte.valida) {
-        errore.textContent = "Una data non è valida: scrivila come 05/05/1968, 05/1968 oppure 1968.";
-        errore.hidden = false;
-        return;
-      }
-      if (nascita.data && morte.data && morte.data < nascita.data) {
-        errore.textContent = "La data di morte viene prima di quella di nascita.";
-        errore.hidden = false;
-        return;
-      }
+      if (!nascita.valida || !morte.valida) return segnala("Una data non è valida: scrivila come 05/05/1968, 05/1968 oppure 1968.");
+      if (nascita.data && morte.data && morte.data < nascita.data) return segnala("La data di morte viene prima di quella di nascita.");
       const dopo = {
         ...p,
         nome: v("nome").trim(), cognome: v("cognome").trim(), soprannome: v("soprannome").trim(), sesso: v("sesso"),
@@ -189,6 +212,14 @@ export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null 
         deceduto: f.elements.deceduto.checked && !morte.data,
         note: v("note").trim(),
       };
+      if (suggerisci) {
+        const campi = differenze(attuale, dopo, CAMPI_PERSONA);
+        if (!Object.keys(campi).length) return segnala("Non hai cambiato nulla: correggi o completa almeno un campo.");
+        try {
+          if (await suggerisci({ azione: "dati", campi }, v("commento").trim())) mostraPersona(ctx, id);
+        } catch (err) { ctx.errore(err); }
+        return;
+      }
       if (!nuova) {
         const ora = ctx.indici().persona.get(id);
         if (ora && ms(ora.aggiornato?.quando) !== versione) {
@@ -198,7 +229,8 @@ export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null 
       }
       try {
         if (dopoSalvataggio) await dopoSalvataggio(dopo);
-        else await ctx.salva({ operazioni: [{ raccolta: "persone", id, dopo }], descrizione: `Modificata la scheda di ${nomeCompleto(dopo)}` });
+        else await ctx.salva({ operazioni: [{ raccolta: "persone", id, dopo }], applicati: applicati(applica),
+          descrizione: suSuggerimento(`Modificata la scheda di ${nomeCompleto(dopo)}`, applica) });
         mostraPersona(ctx, dopo.id);
       } catch (err) { ctx.errore(err); }
     });
@@ -207,10 +239,15 @@ export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null 
 
 // ------------------------------------------------------------ scelta di una persona (nuova o esistente)
 
-function scegliPersona(ctx, { titolo, spiegazione = "", ammessa = () => true, conCoppia = null }) {
+// iniziale: {id} oppure {nuova: {nome, cognome, nascita}}; suggerimento: chiede il commento;
+// conNascita: chiede anche la nascita di chi è nuovo (in chi suggerisce e in chi applica).
+function scegliPersona(ctx, { titolo, spiegazione = "", ammessa = () => true, conCoppia = null, sopra = "",
+  iniziale = null, commento = "", suggerimento = false, conNascita = false }) {
+  const n0 = iniziale?.nuova || {};
   return ctx.dialogo(`
     <form method="dialog" class="modulo scelta">
       <h2>${esc(titolo)}</h2>
+      ${sopra}
       ${spiegazione ? `<p class="spiegazione">${spiegazione}</p>` : ""}
       ${conCoppia || ""}
       <div class="schede-scelta">
@@ -218,19 +255,27 @@ function scegliPersona(ctx, { titolo, spiegazione = "", ammessa = () => true, co
         <label><input type="radio" name="modo" value="esistente"> Già nell'albero</label>
       </div>
       <div data-se="nuova" class="due">
-        <label>Nome <input name="nome" autocomplete="off"></label>
-        <label>Cognome <input name="cognome" autocomplete="off"></label>
+        <label>Nome <input name="nome" value="${esc(n0.nome)}" autocomplete="off" maxlength="${MISURE.nome}"></label>
+        <label>Cognome <input name="cognome" value="${esc(n0.cognome)}" autocomplete="off" maxlength="${MISURE.nome}"></label>
       </div>
+      ${conNascita ? `<div data-se="nuova" class="due">
+        <label>Nascita <span class="facoltativo">se la sai</span><input name="nascita" value="${esc(dataInIngresso(n0.nascita))}" placeholder="gg/mm/aaaa, mm/aaaa o aaaa" inputmode="numeric"></label>
+        <label>Luogo di nascita <input name="nascitaLuogo" value="${esc(n0.nascita?.luogo)}" autocomplete="off" maxlength="${MISURE.luogo}"></label>
+      </div>` : ""}
       <div data-se="esistente" hidden>
         <input name="cerca" type="search" placeholder="Cerca per nome o cognome" autocomplete="off">
         <select name="scelta" size="7"></select>
       </div>
+      ${suggerimento ? campoCommento(commento) : ""}
+      <p class="errore" hidden></p>
       <div class="azioni">
-        <button value="ok" class="primario">Aggiungi</button>
+        <button value="ok" class="primario">${suggerimento ? "Invia il suggerimento" : "Aggiungi"}</button>
         <button value="annulla" formnovalidate>Annulla</button>
       </div>
     </form>`, (d, chiudi) => {
     const f = d.querySelector("form");
+    const errore = f.querySelector(".errore");
+    const segnala = testo => { errore.textContent = testo; errore.hidden = false; };
     const elenco = () => {
       const q = f.elements.cerca.value;
       const lista = (q ? cerca(ctx.albero(), q) : [...ctx.albero().persone].sort((a, b) => nomeCompleto(a).localeCompare(nomeCompleto(b), "it")))
@@ -239,7 +284,7 @@ function scegliPersona(ctx, { titolo, spiegazione = "", ammessa = () => true, co
     };
     const modo = () => {
       const m = f.elements.modo.value;
-      d.querySelector('[data-se="nuova"]').hidden = m !== "nuova";
+      for (const el of d.querySelectorAll('[data-se="nuova"]')) el.hidden = m !== "nuova";
       d.querySelector('[data-se="esistente"]').hidden = m !== "esistente";
       if (m === "esistente") { elenco(); f.elements.cerca.focus(); } else f.elements.nome.focus();
     };
@@ -249,12 +294,32 @@ function scegliPersona(ctx, { titolo, spiegazione = "", ammessa = () => true, co
       e.preventDefault();
       if (e.submitter?.value !== "ok") return chiudi(null);
       const coppia = f.elements.coppia?.value;
-      if (f.elements.modo.value === "nuova") return chiudi({ nuova: { nome: f.elements.nome.value, cognome: f.elements.cognome.value }, coppia });
+      const commento = f.elements.commento?.value.trim() || "";
+      if (f.elements.modo.value === "nuova") {
+        const nuova = { nome: f.elements.nome.value.trim(), cognome: f.elements.cognome.value.trim() };
+        if (suggerimento && !nuova.nome && !nuova.cognome) return segnala("Scrivi almeno il nome o il cognome.");
+        if (conNascita) {
+          const data = normalizzaData(f.elements.nascita.value), luogo = f.elements.nascitaLuogo.value.trim();
+          if (!data.valida) return segnala("La data di nascita non è valida: scrivila come 05/05/1968, 05/1968 oppure 1968.");
+          if (data.data || luogo) nuova.nascita = { data: data.data, circa: false, luogo };
+        }
+        return chiudi({ nuova, coppia, commento });
+      }
       const id = f.elements.scelta.value;
-      if (!id) return;
-      chiudi({ id, coppia });
+      if (!id) return segnala("Scegli una persona dall'elenco.");
+      chiudi({ id, coppia, commento });
     });
     f.elements.nome.focus();
+    // proposta da modificare o da applicare: la persona già nell'albero si ritrova cercandola
+    const scelta = iniziale?.id && ctx.indici().persona.get(iniziale.id);
+    if (iniziale?.id && !scelta) segnala("La persona suggerita non è più nell'albero: scegline un'altra o scrivila come persona nuova.");
+    if (scelta) {
+      f.elements.modo.value = "esistente";
+      f.elements.cerca.value = [scelta.nome, scelta.cognome].filter(Boolean).join(" ");
+      modo();
+      f.elements.scelta.value = scelta.id;
+      if (f.elements.scelta.value !== scelta.id) segnala(`${nomeCompleto(scelta)} non si può più collegare così: scegli un'altra persona.`);
+    }
   });
 }
 
@@ -262,10 +327,16 @@ function scegliPersona(ctx, { titolo, spiegazione = "", ammessa = () => true, co
 const posizioniAttuali = ctx => Object.fromEntries(ctx.scena().nodi.map(n => [n.id, { x: n.x, y: n.y }]));
 const tondo = p => ({ x: Math.round(p.x), y: Math.round(p.y) });
 
-async function aggiungiPartner(ctx, id) {
+async function aggiungiPartner(ctx, id, opz = {}) {
   const p = ctx.indici().persona.get(id);
-  const scelta = await scegliPersona(ctx, { titolo: `Aggiungi un partner di ${nomeCompleto(p)}`, ammessa: q => q.id !== id });
+  const scelta = await scegliPersona(ctx, {
+    titolo: `${verbo(opz)} un partner di ${nomeCompleto(p)}`, ammessa: q => q.id !== id,
+    spiegazione: opz.suggerisci ? "Marito, moglie, compagno o compagna. Se è già nell'albero, sceglilo dall'elenco." : "",
+    sopra: richiamo(opz.applica), iniziale: opz.iniziale, commento: opz.commento,
+    suggerimento: !!opz.suggerisci, conNascita: !!(opz.suggerisci || opz.applica),
+  });
   if (!scelta) return;
+  if (opz.suggerisci) return opz.suggerisci({ azione: "partner", ...personaScelta(scelta) }, scelta.commento);
   const albero = ctx.albero();
   const operazioni = [], disposizione = [];
   let altro = scelta.id;
@@ -278,11 +349,13 @@ async function aggiungiPartner(ctx, id) {
   const u = nuovaUnione(albero, [id, altro]);
   operazioni.push({ raccolta: "unioni", id: u.id, dopo: u });
   const q = ctx.indici().persona.get(altro) || { nome: scelta.nuova?.nome, cognome: scelta.nuova?.cognome };
-  await ctx.salva({ operazioni, disposizione, descrizione: `Aggiunta la coppia ${nomeCompleto(p)} e ${nomeCompleto(q)}` });
+  await ctx.salva({ operazioni, disposizione, applicati: applicati(opz.applica),
+    descrizione: suSuggerimento(`Aggiunta la coppia ${nomeCompleto(p)} e ${nomeCompleto(q)}`, opz.applica) });
   ctx.seleziona(altro, { centra: true });
 }
 
-async function aggiungiFiglio(ctx, id, unioneScelta = null) {
+// opz.azione: «fratello» quando lo si suggerisce dalla scheda del fratello o della sorella
+async function aggiungiFiglio(ctx, id, unioneScelta = null, opz = {}) {
   const ix = ctx.indici();
   const p = ix.persona.get(id);
   const unioni = (ix.unioniDi.get(id) || []).map(uid => ix.unione.get(uid));
@@ -291,11 +364,18 @@ async function aggiungiFiglio(ctx, id, unioneScelta = null) {
     coppia = `<label>Con chi? <select name="coppia">${unioni.map(u => `<option value="${esc(u.id)}">${esc(nomeCompleto(ix.persona.get(coniugeIn(u, id))))}</option>`).join("")}</select></label>`;
   }
   const scelta = await scegliPersona(ctx, {
-    titolo: `Aggiungi un figlio o una figlia di ${nomeCompleto(p)}`,
-    spiegazione: unioni.length ? "" : "L'altro genitore comparirà come «non noto»: potrai completarlo dopo.",
+    titolo: opz.titolo || `${verbo(opz)} un figlio o una figlia di ${nomeCompleto(p)}`,
+    spiegazione: unioni.length ? "" : opz.suggerisci ? "Se sai chi è l'altro genitore, scrivilo in «Come lo sai?»."
+      : "L'altro genitore comparirà come «non noto»: potrai completarlo dopo.",
     ammessa: q => q.id !== id && !ix.genitoriDi.has(q.id), conCoppia: coppia,
+    sopra: richiamo(opz.applica), iniziale: opz.iniziale, commento: opz.commento,
+    suggerimento: !!opz.suggerisci, conNascita: !!(opz.suggerisci || opz.applica),
   });
   if (!scelta) return;
+  if (opz.suggerisci) {
+    const unione = unioneScelta || scelta.coppia || unioni[0]?.id;
+    return opz.suggerisci({ azione: opz.azione || "figlio", ...(unione ? { unione } : {}), ...personaScelta(scelta) }, scelta.commento);
+  }
   const albero = ctx.albero();
   const operazioni = [], disposizione = [];
   const posizioni = posizioniAttuali(ctx);
@@ -318,50 +398,72 @@ async function aggiungiFiglio(ctx, id, unioneScelta = null) {
     disposizione.push({ sezione: "nodi", id: n.id, dopo: tondo(collocaNuova(posizioni, unioniProva, { tipo: "figlio", unione: u.id })) });
   }
   operazioni.push({ raccolta: "unioni", id: u.id, dopo: { ...u, figli: [...u.figli, figlio] } });
-  await ctx.salva({ operazioni, disposizione, descrizione: `Aggiunto un figlio di ${nomeCompleto(p)}` });
+  await ctx.salva({ operazioni, disposizione, applicati: applicati(opz.applica),
+    descrizione: suSuggerimento(`Aggiunto un figlio di ${nomeCompleto(p)}`, opz.applica) });
   ctx.seleziona(figlio, { centra: true });
 }
 
-async function aggiungiGenitori(ctx, id) {
+async function aggiungiGenitori(ctx, id, opz = {}) {
   const ix = ctx.indici();
   const p = ix.persona.get(id);
   const coppie = ctx.albero().unioni;
+  const g = opz.iniziale?.nuovi || [{}, {}];
+  const valore = (i, campo) => esc(g[i]?.[campo] || "");
   const scelta = await ctx.dialogo(`
     <form method="dialog" class="modulo scelta">
-      <h2>Aggiungi i genitori di ${esc(nomeCompleto(p))}</h2>
+      <h2>${verbo(opz)} i genitori di ${esc(nomeCompleto(p))}</h2>
+      ${richiamo(opz.applica)}
       <div class="schede-scelta">
         <label><input type="radio" name="modo" value="nuovi" checked> Persone nuove</label>
         <label><input type="radio" name="modo" value="coppia"> Una coppia già nell'albero</label>
       </div>
       <div data-se="nuovi">
         <p class="spiegazione">Lascia vuoto chi non conosci: comparirà come «non noto».</p>
-        <div class="due"><label>Nome del primo genitore <input name="n1"></label><label>Cognome <input name="c1"></label></div>
-        <div class="due"><label>Nome del secondo genitore <input name="n2"></label><label>Cognome <input name="c2"></label></div>
+        <div class="due"><label>Nome del primo genitore <input name="n1" value="${valore(0, "nome")}" maxlength="${MISURE.nome}"></label><label>Cognome <input name="c1" value="${valore(0, "cognome")}" maxlength="${MISURE.nome}"></label></div>
+        <div class="due"><label>Nome del secondo genitore <input name="n2" value="${valore(1, "nome")}" maxlength="${MISURE.nome}"></label><label>Cognome <input name="c2" value="${valore(1, "cognome")}" maxlength="${MISURE.nome}"></label></div>
       </div>
       <div data-se="coppia" hidden>
         <select name="coppia" size="7">${coppie.map(u => `<option value="${esc(u.id)}">${esc(u.partner.map(q => nomeCompleto(ix.persona.get(q))).join(" e "))}</option>`).join("")}</select>
       </div>
-      <div class="azioni"><button value="ok" class="primario">Aggiungi</button><button value="annulla" formnovalidate>Annulla</button></div>
+      ${opz.suggerisci ? campoCommento(opz.commento) : ""}
+      <p class="errore" hidden></p>
+      <div class="azioni"><button value="ok" class="primario">${pulsante(opz, "Aggiungi")}</button><button value="annulla" formnovalidate>Annulla</button></div>
     </form>`, (d, chiudi) => {
     const f = d.querySelector("form");
-    f.addEventListener("change", e => {
-      if (e.target.name !== "modo") return;
+    const errore = f.querySelector(".errore");
+    const segnala = testo => { errore.textContent = testo; errore.hidden = false; };
+    const modo = () => {
       d.querySelector('[data-se="nuovi"]').hidden = f.elements.modo.value !== "nuovi";
       d.querySelector('[data-se="coppia"]').hidden = f.elements.modo.value !== "coppia";
-    });
+    };
+    f.addEventListener("change", e => { if (e.target.name === "modo") modo(); });
     f.addEventListener("submit", e => {
       e.preventDefault();
       if (e.submitter?.value !== "ok") return chiudi(null);
-      if (f.elements.modo.value === "coppia") return f.elements.coppia.value ? chiudi({ coppia: f.elements.coppia.value }) : null;
-      chiudi({ nuovi: [{ nome: f.elements.n1.value, cognome: f.elements.c1.value }, { nome: f.elements.n2.value, cognome: f.elements.c2.value }] });
+      const commento = f.elements.commento?.value.trim() || "";
+      if (f.elements.modo.value === "coppia") {
+        return f.elements.coppia.value ? chiudi({ coppia: f.elements.coppia.value, commento }) : segnala("Scegli una coppia dall'elenco.");
+      }
+      const nuovi = [1, 2].map(i => ({ nome: f.elements[`n${i}`].value.trim(), cognome: f.elements[`c${i}`].value.trim() }));
+      if (opz.suggerisci && !nuovi.some(n => n.nome || n.cognome)) return segnala("Scrivi almeno un nome o un cognome.");
+      chiudi({ nuovi, commento });
     });
+    const coppia = opz.iniziale?.coppia;
+    if (coppia && ix.unione.has(coppia)) {
+      f.elements.modo.value = "coppia";
+      modo();
+      f.elements.coppia.value = coppia;
+    } else if (coppia) segnala("La coppia suggerita non è più nell'albero.");
   });
   if (!scelta) return;
+  if (opz.suggerisci) {
+    return opz.suggerisci({ azione: "genitori", ...(scelta.coppia ? { coppia: scelta.coppia } : { nuovi: scelta.nuovi }) }, scelta.commento);
+  }
   const albero = ctx.albero();
   if (scelta.coppia) {
     const u = ix.unione.get(scelta.coppia);
     await ctx.salva({ operazioni: [{ raccolta: "unioni", id: u.id, dopo: { ...u, figli: [...u.figli, id] } }],
-      descrizione: `Collegati i genitori di ${nomeCompleto(p)}` });
+      applicati: applicati(opz.applica), descrizione: suSuggerimento(`Collegati i genitori di ${nomeCompleto(p)}`, opz.applica) });
     return mostraPersona(ctx, id);
   }
   const operazioni = [], disposizione = [];
@@ -378,7 +480,8 @@ async function aggiungiGenitori(ctx, id) {
   });
   const u = nuovaUnione(albero, nuovi.map(n => n.id), [id]);
   operazioni.push({ raccolta: "unioni", id: u.id, dopo: u });
-  await ctx.salva({ operazioni, disposizione, descrizione: `Aggiunti i genitori di ${nomeCompleto(p)}` });
+  await ctx.salva({ operazioni, disposizione, applicati: applicati(opz.applica),
+    descrizione: suSuggerimento(`Aggiunti i genitori di ${nomeCompleto(p)}`, opz.applica) });
   mostraPersona(ctx, id);
 }
 
@@ -474,32 +577,139 @@ export function mostraUnione(ctx, uid) {
   }, null, { unione: uid });
 }
 
-function modificaUnione(ctx, uid) {
+function modificaUnione(ctx, uid, { iniziale = null, suggerisci = null, commento = "", applica = null } = {}) {
   const ix = ctx.indici();
-  const u = ix.unione.get(uid);
+  const attuale = ix.unione.get(uid);
+  if (!attuale) return ctx.avviso("Questa unione non è più nell'albero.");
+  const u = iniziale ? { ...attuale, ...iniziale } : attuale;
+  const coppia = attuale.partner.map(p => nomeCompleto(ix.persona.get(p))).join(" e ");
   const html = `
     <form class="modulo">
+      ${richiamo(applica)}
+      ${suggerisci ? `<p class="spiegazione">Correggi o completa quello che sai di questa coppia. Chi cura l'albero vedrà la tua proposta e la applicherà.</p>` : ""}
       <label>Stato <select name="stato">
         <option value="certa"${u.stato !== "ipotesi" ? " selected" : ""}>certa</option>
         <option value="ipotesi"${u.stato === "ipotesi" ? " selected" : ""}>ipotesi da confermare</option>
       </select></label>
-      <label>Note <textarea name="note" rows="5">${esc(u.note)}</textarea></label>
-      <label>Fonte <input name="fonte" value="${esc(u.fonte)}"></label>
-      <div class="azioni"><button type="submit" class="primario">Salva</button><button type="button" data-azione="annulla">Annulla</button></div>
+      <label>Note <textarea name="note" rows="5"${suggerisci ? ` maxlength="${MISURE.note}" placeholder="Per esempio: si sono sposati a Napoli nel 1958"` : ""}>${esc(u.note)}</textarea></label>
+      <label>Fonte <input name="fonte" value="${esc(u.fonte)}"${suggerisci ? ` maxlength="${MISURE.fonte}"` : ""}></label>
+      ${suggerisci ? campoCommento(commento) : ""}
+      <p class="errore" hidden></p>
+      <div class="azioni"><button type="submit" class="primario">${pulsante({ suggerisci }, "Salva")}</button><button type="button" data-azione="annulla">Annulla</button></div>
     </form>`;
-  ctx.apriPannello("Modifica l'unione", html, azione => { if (azione === "annulla") mostraUnione(ctx, uid); }, corpo => {
+  const titolo = suggerisci ? "Suggerisci: l'unione" : applica ? "Applica: l'unione" : "Modifica l'unione";
+  ctx.apriPannello(titolo, html, azione => { if (azione === "annulla") mostraUnione(ctx, uid); }, corpo => {
     const f = corpo.querySelector("form");
     f.addEventListener("submit", async e => {
       e.preventDefault();
       const dopo = { ...u, stato: f.elements.stato.value, note: f.elements.note.value.trim(), fonte: f.elements.fonte.value.trim() };
       try {
-        await ctx.salva({ operazioni: [{ raccolta: "unioni", id: uid, dopo }],
-          descrizione: `Modificata l'unione fra ${u.partner.map(p => nomeCompleto(ix.persona.get(p))).join(" e ")}` });
+        if (suggerisci) {
+          const campi = differenze(attuale, dopo, CAMPI_UNIONE);
+          if (!Object.keys(campi).length) {
+            const errore = f.querySelector(".errore");
+            errore.textContent = "Non hai cambiato nulla: correggi o completa almeno un campo.";
+            errore.hidden = false;
+            return;
+          }
+          if (await suggerisci({ azione: "dati", campi }, f.elements.commento.value.trim())) mostraUnione(ctx, uid);
+          return;
+        }
+        await ctx.salva({ operazioni: [{ raccolta: "unioni", id: uid, dopo }], applicati: applicati(applica),
+          descrizione: suSuggerimento(`Modificata l'unione fra ${coppia}`, applica) });
         mostraUnione(ctx, uid);
       } catch (err) { ctx.errore(err); }
     });
   });
 }
+
+// ------------------------------------------------------------ suggerimenti
+
+const VOCI = {
+  dati: ["Correggi o completa i dati", "nome, date e luoghi, note"],
+  datiIgnoto: ["Sai chi è?", "scrivi nome, cognome e quello che sai"],
+  datiUnione: ["Correggi o completa i dati della coppia", "nozze, note, se l'unione è certa"],
+  partner: ["Aggiungi un partner", "marito, moglie, compagno o compagna"],
+  figlio: ["Aggiungi un figlio o una figlia", "anche se è già nell'albero"],
+  fratello: ["Aggiungi un fratello o una sorella", "con gli stessi genitori"],
+  genitori: ["Aggiungi i genitori", "anche uno solo dei due"],
+};
+
+// Chi ha il link di lettura sceglie che cosa proporre; poi si apre il modulo di sempre.
+export async function suggerisci(ctx, nodo, tipo) {
+  const ix = ctx.indici();
+  let voci;
+  if (tipo === "unione") voci = [["dati", ...VOCI.datiUnione], ["figlio", ...VOCI.figlio]];
+  else {
+    const p = ix.persona.get(nodo);
+    if (!p) return;
+    voci = [["dati", ...(ignoto(p) ? VOCI.datiIgnoto : VOCI.dati)], ["partner", ...VOCI.partner], ["figlio", ...VOCI.figlio],
+      ix.genitoriDi.has(nodo) ? ["fratello", ...VOCI.fratello] : ["genitori", ...VOCI.genitori]];
+  }
+  const azione = await ctx.dialogo(`<form method="dialog" class="modulo"><h2>Suggerisci una modifica</h2>
+    <p class="spiegazione">Che cosa vuoi proporre? Chi cura l'albero vedrà il suggerimento fra i post-it e lo potrà applicare.</p>
+    <div class="griglia-pulsanti">${voci.map(([v, t, s]) => `<button value="${v}"><b>${esc(t)}</b><span>${esc(s)}</span></button>`).join("")}</div>
+    <div class="azioni"><button value="no" formnovalidate>Annulla</button></div></form>`,
+  (d, chiudi) => d.querySelector("form").addEventListener("submit", e => {
+    e.preventDefault();
+    chiudi(e.submitter?.value === "no" ? null : e.submitter?.value);
+  }));
+  if (azione) apriModulo(ctx, nodo, tipo, azione, { suggerisci: inviaSuggerimento(ctx, nodo, tipo) });
+}
+
+// Manda la proposta (nuova, o al posto di quella del post-it n); true se è partita.
+const inviaSuggerimento = (ctx, nodo, tipo, n = null) => async (proposta, commento) => {
+  if (!await ctx.nomeAutore()) return false;
+  if (n) await ctx.attendiPoco(ctx.dati().modificaPostit(n.id, commento, proposta));
+  else await ctx.attendiPoco(ctx.dati().aggiungiPostit({ nodo, tipo, testo: commento, proposta }));
+  ctx.avviso(n ? "Suggerimento aggiornato." : "Suggerimento inviato: grazie! Chi cura l'albero lo vedrà fra i post-it.");
+  return true;
+};
+
+// Il modulo giusto per l'azione; opz: {suggerisci | applica, iniziale, commento, unione}.
+function apriModulo(ctx, nodo, tipo, azione, opz) {
+  const ix = ctx.indici();
+  if (tipo === "unione") {
+    const u = ix.unione.get(nodo);
+    if (!u) return ctx.avviso("Questa unione non è più nell'albero.");
+    if (azione === "dati") return modificaUnione(ctx, nodo, opz);
+    const coppia = u.partner.map(p => nomeCompleto(ix.persona.get(p))).join(" e ");
+    return aggiungiFiglio(ctx, u.partner[0], nodo, { ...opz, titolo: `${verbo(opz)} un figlio o una figlia di ${coppia}` });
+  }
+  const p = ix.persona.get(nodo);
+  if (!p) return ctx.avviso("Questa persona non è più nell'albero.");
+  if (azione === "dati") return modificaPersona(ctx, nodo, opz);
+  if (azione === "partner") return aggiungiPartner(ctx, nodo, opz);
+  if (azione === "figlio") {
+    const u = ix.unione.get(opz.unione);
+    return aggiungiFiglio(ctx, nodo, u?.partner.includes(nodo) ? u.id : null, opz);
+  }
+  if (azione === "fratello") {
+    const u = ix.unione.get(ix.genitoriDi.get(nodo));
+    if (!u) return ctx.avviso(`I genitori di ${nomeCompleto(p)} non sono nell'albero: aggiungi prima loro.`);
+    return aggiungiFiglio(ctx, u.partner[0], u.id, { ...opz, azione: "fratello", titolo: `${verbo(opz)} un fratello o una sorella di ${nomeCompleto(p)}` });
+  }
+  if (azione === "genitori") {
+    if (opz.applica && ix.genitoriDi.has(nodo)) {
+      return ctx.avviso(`${nomeCompleto(p)} ha già i genitori nell'albero: leggi il suggerimento e correggi a mano, se serve.`);
+    }
+    return aggiungiGenitori(ctx, nodo, opz);
+  }
+}
+
+function daProposta(n) {
+  const pr = n.proposta;
+  const iniziale = pr.azione === "dati" ? pr.campi
+    : pr.azione === "genitori" ? { coppia: pr.coppia || null, nuovi: pr.nuovi || null }
+    : { id: pr.persona || null, nuova: pr.nuova || null };
+  return { iniziale, commento: n.testo || "", unione: pr.unione || null };
+}
+
+// Chi ha scritto il suggerimento lo riapre per cambiarlo; chi modifica lo applica.
+export const modificaSuggerimento = (ctx, n) =>
+  apriModulo(ctx, n.nodo, n.tipo, n.proposta.azione, { ...daProposta(n), suggerisci: inviaSuggerimento(ctx, n.nodo, n.tipo, n) });
+export const applicaSuggerimento = (ctx, n) =>
+  apriModulo(ctx, n.nodo, n.tipo, n.proposta.azione, { ...daProposta(n), applica: n });
 
 // ------------------------------------------------------------ persona senza legami
 
