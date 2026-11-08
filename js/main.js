@@ -117,7 +117,7 @@ function avviso(testo, tipo = "") {
 function errore(err) {
   console.error(err);
   const permesso = /permission|insufficient/i.test(err?.message || "");
-  avviso(permesso ? "Non salvato: questo link non permette di modificare, o è stato sostituito." : `Qualcosa non ha funzionato: ${err?.message || err}`, "errore");
+  avviso(permesso ? "Non salvato. Ricarica la pagina e riprova: se succede ancora, questo link non permette di modificare o è stato sostituito." :`Qualcosa non ha funzionato: ${err?.message || err}`, "errore");
 }
 
 // ------------------------------------------------------------ disegno
