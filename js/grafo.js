@@ -1,0 +1,100 @@
+// Relazioni di parentela calcolate dai dati: genitori, partner, figli, fratelli,
+// antenati, discendenti, famiglia d'origine. Modulo puro.
+
+export function indici(albero) {
+  const persona = new Map(albero.persone.map(p => [p.id, p]));
+  const unione = new Map(albero.unioni.map(u => [u.id, u]));
+  const unioniDi = new Map(albero.persone.map(p => [p.id, []]));
+  const genitoriDi = new Map();                    // figlio -> id unione
+  for (const u of albero.unioni) {
+    for (const p of u.partner) if (unioniDi.has(p)) unioniDi.get(p).push(u.id);
+    for (const f of u.figli) genitoriDi.set(f, u.id);
+  }
+  const ceppi = new Map((albero.meta?.ceppi || []).map((c, i) => [c.cognome, { ...c, indice: i }]));
+  return { persona, unione, unioniDi, genitoriDi, ceppi };
+}
+
+export const coniugeIn = (u, p) => (u.partner[0] === p ? u.partner[1] : u.partner[0]);
+
+export function parenti(ix, id) {
+  const uGen = ix.unione.get(ix.genitoriDi.get(id));
+  const genitori = uGen ? [...uGen.partner] : [];
+  const fratelli = uGen ? uGen.figli.filter(f => f !== id) : [];
+  const unioni = (ix.unioniDi.get(id) || []).map(uid => {
+    const u = ix.unione.get(uid);
+    return { unione: u, partner: coniugeIn(u, id), figli: [...u.figli] };
+  });
+  return { unioneGenitori: uGen || null, genitori, fratelli, unioni };
+}
+
+export function antenati(ix, id) {
+  const out = new Set(), coda = [id];
+  while (coda.length) {
+    const q = coda.pop();
+    const u = ix.unione.get(ix.genitoriDi.get(q));
+    if (!u) continue;
+    for (const p of u.partner) if (!out.has(p)) { out.add(p); coda.push(p); }
+  }
+  return out;
+}
+
+// discendenti di id, con i partner che ne sono l'altro genitore (servono a leggere le unioni)
+export function discendenti(ix, id, conPartner = true) {
+  const out = new Set(), coda = [id], visti = new Set([id]);
+  while (coda.length) {
+    const q = coda.pop();
+    for (const uid of ix.unioniDi.get(q) || []) {
+      const u = ix.unione.get(uid);
+      if (!u.figli.length) continue;
+      if (conPartner) out.add(coniugeIn(u, q));
+      for (const f of u.figli) if (!visti.has(f)) { visti.add(f); out.add(f); coda.push(f); }
+    }
+  }
+  out.delete(id);
+  return out;
+}
+
+export function ramificazioni(ix, id, verso = "entrambi") {
+  const out = new Set([id]);
+  if (verso !== "discendenti") for (const p of antenati(ix, id)) out.add(p);
+  if (verso !== "antenati") for (const p of discendenti(ix, id)) out.add(p);
+  return out;
+}
+
+// colore e famiglia d'origine di una persona: il suo cognome, se è un ceppo
+export function ceppoDi(ix, p) {
+  return ix.ceppi.get(p.cognome) || null;
+}
+
+export function nomeCompleto(p) {
+  if (!p) return "";
+  if (p.segnaposto) return p.nome || "non noti";
+  const parti = [p.nome || "?", p.soprannome ? `«${p.soprannome}»` : "", p.cognome || ""].filter(Boolean);
+  return parti.join(" ").trim() || "non noto";
+}
+
+export const ignoto = p => p.segnaposto || (!p.nome && !p.cognome);
+
+// ricerca senza badare ad accenti e maiuscole
+export const normalizza = s => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+
+export function cerca(albero, testo) {
+  const q = normalizza(testo).split(/\s+/).filter(Boolean);
+  if (!q.length) return [];
+  const punteggio = p => {
+    const campi = [p.nome, p.cognome, p.soprannome].map(normalizza);
+    const note = normalizza(p.note) + " " + normalizza(p.nascita?.luogo) + " " + normalizza(p.morte?.luogo);
+    let s = 0;
+    for (const parola of q) {
+      if (campi.some(c => c === parola)) s += 3;
+      else if (campi.some(c => c.startsWith(parola))) s += 2;
+      else if (campi.some(c => c.includes(parola))) s += 1;
+      else if (note.includes(parola)) s += 0.5;
+      else return 0;
+    }
+    return s;
+  };
+  return albero.persone.map(p => [punteggio(p), p]).filter(([s]) => s > 0)
+    .sort((a, b) => b[0] - a[0] || nomeCompleto(a[1]).localeCompare(nomeCompleto(b[1]), "it"))
+    .map(([, p]) => p);
+}
