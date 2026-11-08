@@ -615,7 +615,7 @@ function mostraPannelloParentela() {
   const e = P.esito, ix = S.scena.ix;
   const nome = id => nomeCompleto(ix.persona.get(id));
   const elenco = ids => ids.map((id, i) => `${i === 0 ? "" : i === ids.length - 1 ? ` ${ed(nome(id))} ` : ", "}<button type="button" class="collegamento" data-azione="vai" data-id="${esc(id)}">${esc(nome(id))}</button>`).join("");
-  const freccia = { su: "↑", giu: "↓", partner: "↔" };
+  const freccia = { su: "↑", giu: "↓", partner: "↔", fratello: "↔" };
   const passi = e.passi.map((p, i) => `<li><span class="verso" aria-hidden="true">${i ? freccia[p.verso] : "●"}</span>`
     + `${p.parola ? `<span class="parola">${esc(p.parola)}</span>` : ""}<span>${elenco(p.ids)}</span></li>`).join("");
   const dubbi = e.dubbi.length ? `<p class="spiegazione">Di ${elenco(e.dubbi)} la scheda non dice il sesso e il nome non basta a capirlo: per questo alcune parole sono doppie.${ctx.modifica ? "" : " Se lo sai, suggeriscilo dalla scheda."}</p>` : "";

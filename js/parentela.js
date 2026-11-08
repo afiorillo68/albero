@@ -278,7 +278,7 @@ export function comeSiamoParenti(albero, a, b, ix) {
 
   esito.titolo ||= esito.frase;
   Object.assign(esito, disegno(ix, esito.seq || [a, b], esito.tipo === "nessuno"));
-  esito.passi = esito.seq ? passi(ix, esito.seq, sx) : [];
+  esito.passi = esito.seq ? passi(ix, esito.seq, sx, chi) : [];
   esito.dubbi = [...dubbi].filter(id => !ignoto(persona(id)));
   return esito;
 }
@@ -304,14 +304,18 @@ function disegno(ix, seq, vuoto) {
   return { persone, unioni, archi };
 }
 
-// Il percorso da leggere: ogni passo con la parola che lo lega al precedente.
-function passi(ix, seq, sx) {
+// Il percorso da leggere: ogni passo con la parola che lo lega al precedente. Salire a un
+// genitore e scendere subito a un altro figlio è un passo solo: fratello o sorella, «per parte
+// di padre» o «di madre» se il genitore in comune è uno solo.
+function passi(ix, seq, sx, chi) {
   const out = [{ ids: [seq[0]], verso: null, parola: "" }];
   for (let i = 1; i < seq.length; i++) {
     const h = passo(ix, seq[i - 1], seq[i]), dopo = seq[i + 1] && passo(ix, seq[i], seq[i + 1]);
-    if (h.verso === "su" && dopo?.verso === "giu" && dopo.unione === h.unione) {
-      const altro = coniugeIn(ix.unione.get(h.unione), seq[i]);
-      out.push({ ids: [seq[i], altro].filter(id => id && ix.persona.has(id)), verso: "su", parola: "genitori" });
+    if (h.verso === "su" && dopo?.verso === "giu") {
+      const s = sessoDi(ix.persona.get(seq[i]));
+      const parte = dopo.unione === h.unione ? "" : ` per parte di ${s === "M" ? "padre" : s === "F" ? "madre" : chi(seq[i])}`;
+      out.push({ ids: [seq[i + 1]], verso: "fratello", parola: forma(FRATELLO, sx(seq[i + 1]), false) + parte });
+      i++;
     } else {
       const c = h.verso === "su" ? GENITORE : h.verso === "giu" ? FIGLIO : PARTNER;
       out.push({ ids: [seq[i]], verso: h.verso, parola: forma(c, sx(seq[i]), false) });
