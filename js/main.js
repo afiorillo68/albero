@@ -13,6 +13,7 @@ import { ingressoLayout, annoDi, statoInVita } from "./deduzioni.js";
 import { filtriVuoti, attivi, visibilita, descriviIsolamento, ALTRI, MANCANTI, VOCI_VITA } from "./filtri.js";
 import { mostraPersona, mostraUnione, nuovaPersonaLibera, completaDaElenco } from "./scheda.js";
 import { cosaManca, scegli, TIPI } from "./mancanti.js";
+import { comeSiamoParenti, ed } from "./parentela.js";
 import { mostraStorico } from "./storico.js";
 import { mostraTuttiPostit } from "./postit.js";
 import { CAMPI, GRUPPI, operatori, senzaValore, nuovaCondizione, criteriVuoti, completa, attiva as avanzataAttiva,
@@ -56,6 +57,8 @@ const S = {
   postit: [],
   // «Cosa manca»: i filtri del pannello e lo scorrimento da ritrovare tornando da un modulo
   mancanti: { tipo: null, famiglia: null, scorrimento: 0 },
+  // «Come siamo parenti?»: {fase: "scelta", primo} mentre si toccano le persone, {fase: "esito", a, b, esito} dopo
+  parentela: null,
   pannello: null, primoDisegno: true,
 };
 let dati = null, vista = null, disposizione = null;
@@ -74,12 +77,14 @@ function apriPannello(titolo, html, suAzione = null, prepara = null, contesto = 
   corpo.scrollTop = scorrimento;
   S.pannello = { suAzione, modulo: !!corpo.querySelector("form"), ...contesto };
   prepara?.(corpo);
+  aggiornaParentela();
 }
 
 function chiudiPannello() {
   $("#pannello").hidden = true;
   document.body.classList.remove("con-pannello");
   S.pannello = null;
+  aggiornaParentela();
 }
 
 $("#pannello-corpo").addEventListener("click", e => {
@@ -171,6 +176,7 @@ function istantanea() {
     cerca: $("#cerca").value, trovati: [...S.trovati],
     disposizione: !$("#attrezzi").hidden,
     mancanti: { tipo: S.mancanti.tipo, famiglia: S.mancanti.famiglia },
+    parentela: S.parentela && { fase: S.parentela.fase, primo: S.parentela.primo || null, a: S.parentela.a || null, b: S.parentela.b || null },
     // un modulo aperto da «Cosa manca» torna all'elenco, dov'era
     pannello: !p ? null : p.modulo && p.da === "mancanti" ? { tipo: "mancanti" }
       : p.modulo ? { persona: typeof p.di === "string" ? p.di : S.sel, unione: S.sel ? null : S.selUnione }
@@ -190,6 +196,9 @@ const daRipristinare = (() => {
 
 async function ripristinaStato(r) {
   const ix = S.scena.ix;
+  const rp = r.parentela;
+  if (rp?.fase === "esito" && ix.persona.has(rp.a) && ix.persona.has(rp.b)) mostraParentela(rp.a, rp.b, { inquadra: false, pannello: false });
+  else if (rp?.fase === "scelta") { attivaParentela(); if (ix.persona.has(rp.primo)) S.parentela.primo = rp.primo; aggiornaParentela(); }
   S.sel = ix.persona.has(r.sel) ? r.sel : null;
   S.selUnione = ix.unione.has(r.selUnione) ? r.selUnione : null;
   S.filtri = Object.fromEntries(Object.entries(filtriVuoti()).map(([k, v]) => [k, new Set(r.filtri?.[k] || v)]));
@@ -213,6 +222,7 @@ async function ripristinaStato(r) {
   else if (p?.tipo === "menu") mostraMenu();
   else if (p?.tipo === "postit") mostraTuttiPostit(ctx);
   else if (p?.tipo === "mancanti") mostraMancanti();
+  else if (p?.tipo === "parentela") mostraPannelloParentela();
   else if (p?.tipo === "storico" && ctx.modifica) await mostraStorico(ctx);
   if (S.pannello) $("#pannello-corpo").scrollTop = r.scorrimento || 0;
   avviso("Albero aggiornato alla versione nuova.");
@@ -246,8 +256,12 @@ function applicaClassi() {
   S.dentro = v.dentro;
   // chi passa la ricerca avanzata (e i filtri) brilla come i risultati della ricerca veloce
   const trovati = S.esitoAvanzata ? new Set([...S.trovati, ...v.dentro]) : S.trovati;
+  // con la parentela in vista si illumina il percorso e il resto si attenua, sopra filtri e isolamento
+  const P = S.parentela, E = P?.fase === "esito" ? P.esito : null;
+  const attenuati = E ? new Set(S.scena.nodi.map(n => n.id).filter(id => !E.persone.has(id))) : v.attenuati;
   vista.classi({ selezionata: S.sel, unioneSelezionata: S.selUnione, arcoSelezionato: disposizione.stato().arcoSel,
-    attenuati: v.attenuati, nascosti: v.nascosti, evidenziati: S.evidenziati, trovati });
+    attenuati, nascosti: E ? new Set() : v.nascosti, evidenziati: S.evidenziati, trovati,
+    percorso: E, scelti: new Set(E ? [E.a, E.b] : P?.primo ? [P.primo] : []) });
   aggiornaNastro();
   $("#b-avanzata")?.classList.toggle("attiva", !!S.esitoAvanzata);
   aggiornaEsitiAvanzata();
@@ -521,6 +535,108 @@ function mostraMancanti() {
   }, null, { tipo: "mancanti" });
 }
 
+// ------------------------------------------------------------ come siamo parenti
+// Si attiva il pulsante e si toccano due persone sull'albero, o le si cerca nella casella:
+// l'albero illumina il percorso fra loro e il pannello dice la parentela nei due versi. Lo
+// stesso pulsante diventa «Annulla» mentre si sceglie e «Nascondi parentela» col risultato.
+function aggiornaParentela() {
+  const P = S.parentela, b = $("#b-parentela"), g = $("#guida-parentela");
+  document.body.classList.toggle("in-parentela", !!P);
+  b.classList.toggle("attiva", !!P);
+  b.querySelector("span").textContent = !P ? "Parentela" : P.fase === "scelta" ? "Annulla" : "Nascondi parentela";
+  b.title = !P ? "Come siamo parenti? Tocca due persone" : P.fase === "scelta" ? "Smetti di scegliere" : "Togli il percorso dall'albero";
+  // la guida sull'albero: che cosa toccare, poi la risposta breve quando il pannello non la mostra già
+  if (!P || (P.fase === "esito" && S.pannello?.tipo === "parentela")) { g.hidden = true; return; }
+  g.hidden = false;
+  const primo = P.primo && S.scena?.ix.persona.get(P.primo);
+  g.innerHTML = P.fase === "esito" ? `<span class="titolo-parentela">${esc(P.esito.titolo)}</span><button type="button" data-parentela="dettagli">Dettagli</button>`
+    : primo ? `<b>Ora tocca la seconda persona.</b><span>La prima è ${esc(nomeCompleto(primo))}: toccala di nuovo per cambiarla.</span>`
+    : `<b>Tocca la prima persona.</b><span>Puoi anche cercarla nella casella in alto.</span>`;
+}
+
+function attivaParentela() {
+  if (disposizione.attivo) attivaDisposizione(false);
+  chiudiPannello();
+  S.sel = null;
+  S.selUnione = null;
+  S.parentela = { fase: "scelta", primo: null };
+  applicaClassi();
+  aggiornaParentela();
+}
+
+function nascondiParentela() {
+  const pannello = S.pannello?.tipo === "parentela";
+  S.parentela = null;
+  if (pannello) chiudiPannello();
+  applicaClassi();
+  aggiornaParentela();
+}
+
+// un tocco sull'albero mentre si sceglie: solo le persone contano, la prima ritoccata si toglie
+function scegliPerParentela(b) {
+  const P = S.parentela, ix = S.scena.ix;
+  const id = b.tipo === "persona" || (b.tipo === "postit" && ix.persona.has(b.id)) ? b.id : null;
+  if (!id) { if (b.tipo !== "vuoto") avviso("Tocca il riquadro di una persona."); return; }
+  if (ix.persona.get(id).segnaposto) { avviso("Questo riquadro sta per i figli non noti: scegli una persona."); return; }
+  if (!P.primo) P.primo = id;
+  else if (P.primo === id) P.primo = null;
+  else return mostraParentela(P.primo, id);
+  applicaClassi();
+  aggiornaParentela();
+}
+
+function mostraParentela(a, b, { inquadra = true, pannello = true } = {}) {
+  S.parentela = { fase: "esito", a, b, esito: comeSiamoParenti(S.albero, a, b, S.scena.ix) };
+  if (S.ricompatta) { S.ricompatta = null; ridisegna(); }
+  S.sel = null;
+  S.selUnione = null;
+  applicaClassi();
+  if (pannello) mostraPannelloParentela();
+  aggiornaParentela();
+  if (inquadra) {
+    inquadraPersone(new Set(S.parentela.esito.persone));
+    setTimeout(() => vista.increspa(new Set([a, b])), 120);
+  }
+}
+
+// i dati sono cambiati: la risposta si rifà, o sparisce se una delle due persone non c'è più
+function ricalcolaParentela() {
+  const P = S.parentela, ix = S.scena.ix;
+  if (!P) return;
+  if (P.fase === "scelta") { if (P.primo && !ix.persona.has(P.primo)) P.primo = null; return aggiornaParentela(); }
+  if (!ix.persona.has(P.a) || !ix.persona.has(P.b)) { avviso("Una delle due persone non è più nell'albero."); return nascondiParentela(); }
+  P.esito = comeSiamoParenti(S.albero, P.a, P.b, ix);
+  aggiornaParentela();
+}
+
+function mostraPannelloParentela() {
+  const P = S.parentela;
+  if (P?.fase !== "esito") return;
+  const e = P.esito, ix = S.scena.ix;
+  const nome = id => nomeCompleto(ix.persona.get(id));
+  const elenco = ids => ids.map((id, i) => `${i === 0 ? "" : i === ids.length - 1 ? ` ${ed(nome(id))} ` : ", "}<button type="button" class="collegamento" data-azione="vai" data-id="${esc(id)}">${esc(nome(id))}</button>`).join("");
+  const freccia = { su: "↑", giu: "↓", partner: "↔" };
+  const passi = e.passi.map((p, i) => `<li><span class="verso" aria-hidden="true">${i ? freccia[p.verso] : "●"}</span>`
+    + `${p.parola ? `<span class="parola">${esc(p.parola)}</span>` : ""}<span>${elenco(p.ids)}</span></li>`).join("");
+  const dubbi = e.dubbi.length ? `<p class="spiegazione">Di ${elenco(e.dubbi)} la scheda non dice il sesso e il nome non basta a capirlo: per questo alcune parole sono doppie.${ctx.modifica ? "" : " Se lo sai, suggeriscilo dalla scheda."}</p>` : "";
+  const gradi = e.tipo === "sangue" || e.tipo === "affini"
+    ? `<p class="spiegazione">I gradi si contano come nel Codice civile: si sale da una persona fino all'antenato in comune e si scende fino all'altra, senza contare l'antenato.</p>` : "";
+  apriPannello("Come siamo parenti?", `<div class="parentela">
+    <p class="risposta">${esc(e.titolo)}</p>
+    ${e.frase !== e.titolo ? `<p class="catena">${esc(e.frase)}</p>` : ""}
+    ${e.inversa ? `<p class="inversa">${esc(e.inversa)}</p>` : ""}
+    ${e.spiegazione ? `<p class="spiegazione">${esc(e.spiegazione)}</p>` : ""}
+    ${e.grado ? `<p class="grado">${esc(e.grado)}</p>` : ""}
+    ${e.stipiti.length ? `<p class="stipite">${e.stipiti.length > 1 ? "Antenati in comune" : "Antenato in comune"}: ${elenco(e.stipiti)}</p>` : ""}
+    ${passi ? `<section><h3>Il percorso sull'albero</h3><ol class="passi-parentela">${passi}</ol></section>` : ""}
+    ${dubbi}${gradi}
+    <div class="azioni"><button type="button" class="primario" data-azione="altre">Scegli altre due persone</button></div>
+  </div>`, (azione, el) => {
+    if (azione === "vai") return centraNodo(el.dataset.id, "persona");
+    if (azione === "altre") return attivaParentela();
+  }, null, { tipo: "parentela" });
+}
+
 // ------------------------------------------------------------ ricerca
 const ATTESA_RICERCA = 750;      // ms dall'ultimo tasto prima di evidenziare e inquadrare
 
@@ -720,7 +836,14 @@ function preparaRicerca() {
       setTimeout(() => vista.increspa(ids), 120);
     }, ATTESA_RICERCA);
   };
-  const vai = r => { if (!r) return; campo.value = ""; trovati = []; disegna(); segna([]); campo.blur(); seleziona(r.p.id, { centra: true }); };
+  const vai = r => {
+    if (!r) return;
+    campo.value = ""; trovati = []; disegna(); segna([]); campo.blur();
+    if (S.parentela?.fase !== "scelta") return seleziona(r.p.id, { centra: true });
+    const n = S.scena.nodi.find(x => x.id === r.p.id);
+    if (n) vista.centraSu(n.x + W / 2, n.y + H / 2, riserva());
+    scegliPerParentela({ tipo: "persona", id: r.p.id });
+  };
   campo.addEventListener("input", () => {
     const tutti = S.albero ? cerca(S.albero, campo.value, { dettagli: true }) : [];
     trovati = tutti.slice(0, 8);
@@ -853,6 +976,7 @@ function mostraMenu() {
       <li>I colori sono le famiglie d'origine: toccali nel nastro in alto per filtrare.</li>
       <li>Il pulsante a cursori nella casella di ricerca apre la ricerca avanzata: condizioni su tutti i campi, anche età e parentele, da combinare.</li>
       <li><button type="button" class="collegamento" data-azione="manca">«Cosa manca»</button>, il pulsante con il punto di domanda, elenca date e nomi che non sappiamo ancora, dalle generazioni più vecchie: ${modifica ? "«Completa» apre la scheda sul dato che manca" : "se ne sai uno, tocca «Lo so io» e manda il suggerimento"}.</li>
+      <li><button type="button" class="collegamento" data-azione="parentela">«Come siamo parenti?»</button>, il pulsante con le due persone: toccalo e poi tocca due persone sull'albero, o cercale. Il percorso fra loro si illumina e il pannello dice la parentela, con il grado.</li>
       <li>Dalla scheda di una persona o di un'unione puoi lasciare un post-it, per esempio per suggerire una correzione: lo vedono tutti, e lo cambi o lo togli tu dallo stesso dispositivo${modifica ? ", oppure chiunque abbia il link di modifica" : ""}.</li>
       ${modifica ? "<li>«Disposizione» serve a sistemare il disegno: trascina le persone (con Alt anche i discendenti), tocca una linea per piegarla.</li><li>Ogni modifica finisce nello «Storico», da cui si può ripristinare.</li>" : ""}
       <li>† indica chi non è più in vita: lo si deduce dalla data di morte.</li>
@@ -860,6 +984,7 @@ function mostraMenu() {
     <section><h3>Questo dispositivo</h3><button type="button" class="pericolo" data-azione="dimentica">Dimentica l'albero su questo dispositivo</button></section>
   </div>`, async azione => {
     if (azione === "manca") return mostraMancanti();
+    if (azione === "parentela") return attivaParentela();
     if (azione === "nome") { await chiediNome(); mostraMenu(); }
     if (azione === "salva-impostazioni") {
       const c = $("#pannello-corpo");
@@ -921,6 +1046,7 @@ function preparaAttrezzi() {
 
 function attivaDisposizione(si, { spiega = true } = {}) {
   if (si && S.ricompatta) ricompatta(false);
+  if (si && S.parentela) nascondiParentela();
   disposizione.attiva(si);
   $("#attrezzi").hidden = !si;
   $("#b-disposizione").classList.toggle("attiva", si);
@@ -974,6 +1100,7 @@ async function avvia() {
     prendi: (b, m, e) => disposizione.prendi(b, m, e),
     trascina: (fase, m, e, b) => disposizione.trascina(fase, m, e, b),
     clic: b => {
+      if (S.parentela?.fase === "scelta") return scegliPerParentela(b);
       if (disposizione.clic(b)) { applicaClassi(); if (b.tipo === "vuoto") { S.sel = null; S.selUnione = null; chiudiPannello(); applicaClassi(); } return; }
       if (b.tipo === "postit") apriNodo(b.id, S.scena.ix.persona.has(b.id) ? "persona" : "unione", { postit: true });
       else if (b.tipo === "persona") seleziona(b.id);
@@ -996,6 +1123,7 @@ async function avvia() {
         if (S.pulire) { S.provvisorie = { posizioni: {}, archi: {} }; S.pulire = false; }
         $("#titolo").textContent = albero.meta?.titolo || "Albero di famiglia";
         ridisegna();
+        if (S.parentela) { ricalcolaParentela(); applicaClassi(); }
         if (S.primoDisegno) {
           S.primoDisegno = false;
           $("#avvio").hidden = true;
@@ -1011,6 +1139,7 @@ async function avvia() {
           if (pan.persona) mostraPersona(ctx, pan.persona);
           else if (pan.unione) mostraUnione(ctx, pan.unione);
           else if (pan.tipo === "mancanti") mostraMancanti();
+          else if (pan.tipo === "parentela") mostraPannelloParentela();
         }
         aggiornaEsitiAvanzata();
         aggiornaAttrezzi();
@@ -1040,6 +1169,8 @@ async function avvia() {
   $("#b-avanzata").addEventListener("click", apriAvanzata);
   $("#b-postit").addEventListener("click", () => (S.pannello?.tipo === "postit" ? chiudiPannello() : mostraTuttiPostit(ctx)));
   $("#b-manca").addEventListener("click", () => (S.pannello?.tipo === "mancanti" ? chiudiPannello() : mostraMancanti()));
+  $("#b-parentela").addEventListener("click", () => (S.parentela ? nascondiParentela() : attivaParentela()));
+  $("#guida-parentela").addEventListener("click", e => { if (e.target.closest("[data-parentela=dettagli]")) mostraPannelloParentela(); });
   $("#b-esporta").addEventListener("click", () => (S.pannello?.tipo === "esporta" ? chiudiPannello() : mostraEsporta()));
   $("#b-menu").addEventListener("click", () => (S.pannello?.tipo === "menu" ? chiudiPannello() : mostraMenu()));
   $("#b-storico").addEventListener("click", () => mostraStorico(ctx));
@@ -1053,6 +1184,7 @@ async function avvia() {
     const inCampo = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || document.querySelector("dialog[open]");
     if (inCampo) return;
     if (e.key === "/") { e.preventDefault(); $("#cerca").focus(); }
+    if (e.key === "Escape" && S.parentela) return nascondiParentela();
     if (e.key === "Escape") { if (S.pannello) chiudiPannello(); S.sel = null; S.selUnione = null; disposizione.clic({ tipo: "vuoto" }); applicaClassi(); }
     if (e.key === "+" || e.key === "=") vista.zoom(1.25);
     if (e.key === "-") vista.zoom(0.8);

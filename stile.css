@@ -54,7 +54,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #titolo { overflow: hidden; text-overflow: ellipsis; }
 #rete { font-size: 11.5px; font-weight: 500; padding: 2px 8px; border-radius: 99px; background: rgba(255, 255, 255, .18); }
 
-.ricerca { position: relative; flex: 1; max-width: 420px; margin-left: auto; }
+.ricerca { position: relative; flex: 1; min-width: 0; max-width: 420px; margin-left: auto; }
 .ricerca .lente { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 17px; height: 17px; opacity: .7; }
 #cerca {
   width: 100%; height: 36px; padding: 0 40px 0 34px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, .22);
@@ -170,6 +170,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .arco.selezionato .linea { stroke: var(--accento); stroke-width: 3; }
 .unione { cursor: pointer; }
 .unione.selezionata circle { stroke: var(--accento); stroke-width: 3; }
+/* «Come siamo parenti?»: le persone scelte e il percorso fra loro, della stessa misura sullo schermo a ogni zoom */
+.nodo.scelta .riquadro {
+  stroke: var(--accento); stroke-width: max(4px, calc(3.5px / var(--k, 1)));
+  filter: drop-shadow(0 0 calc(7px / var(--k, 1)) rgba(47, 111, 143, .85));
+}
+.nodo.percorso:not(.scelta) .riquadro { stroke: var(--accento); stroke-width: max(2.5px, calc(2.5px / var(--k, 1))); }
+.arco.percorso .linea {
+  stroke: var(--accento); stroke-width: max(3.5px, calc(3.5px / var(--k, 1))); stroke-dasharray: none;
+  filter: drop-shadow(0 0 calc(3px / var(--k, 1)) rgba(47, 111, 143, .7));
+}
+.unione.percorso circle { fill: var(--accento); stroke: var(--accento); stroke-dasharray: none; }
 
 /* modalità disposizione */
 .in-disposizione #tela { cursor: default; background-image: radial-gradient(rgba(0, 0, 0, .07) 1px, transparent 1px); background-size: 20px 20px; }
@@ -320,6 +331,37 @@ select[size] { padding: 4px !important; }
 #attrezzi:not([hidden]) ~ #versione { top: calc(var(--barra-h) + var(--nastro-h) + 66px); }
 @media (min-width: 761px) { .con-pannello #versione { left: calc(50% - 212px); } }
 
+/* guida di «Come siamo parenti?»: che cosa toccare, poi la risposta breve */
+#guida-parentela {
+  position: fixed; left: 50%; transform: translateX(-50%); top: calc(var(--barra-h) + var(--nastro-h) + 12px); z-index: 19;
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 12px;
+  width: max-content; max-width: calc(100vw - 32px); padding: 9px 16px; border-radius: var(--raggio); text-align: center;
+  background: #fff; border: 2px solid var(--accento); box-shadow: var(--ombra); font-size: 14px; line-height: 1.4;
+}
+#guida-parentela span { color: var(--tenue); }
+#guida-parentela .titolo-parentela { color: var(--inchiostro); font-weight: 600; }
+#guida-parentela button { border: 0; border-radius: 9px; padding: 6px 14px; cursor: pointer; font-weight: 600; background: var(--accento); color: #fff; }
+#versione:not([hidden]) ~ #guida-parentela { top: calc(var(--barra-h) + var(--nastro-h) + 66px); }
+@media (min-width: 761px) { .con-pannello #guida-parentela { left: calc(50% - 212px); max-width: calc(100vw - 460px); } }
+#b-parentela.attiva { background: #fff; color: var(--barra-1); font-weight: 600; }
+#b-parentela.attiva .icona { display: none; }
+/* schermi medi con il link di modifica: «Parentela» resta un'icona; mentre è attiva prende il posto
+   di Disposizione, Persona e Storico, che in quel momento non servono, così la scritta ci sta */
+@media (min-width: 761px) and (max-width: 1400px) {
+  .modo-modifica #b-parentela:not(.attiva) span { display: none; }
+  .in-parentela #b-disposizione, .in-parentela #b-aggiungi, .in-parentela #b-storico { display: none; }
+}
+
+.parentela .risposta { font-size: 18px; font-weight: 650; line-height: 1.4; margin: 0 0 8px; }
+.parentela .catena, .parentela .inversa { line-height: 1.5; margin: 0 0 8px; }
+.parentela .inversa { color: var(--tenue); }
+.parentela .grado, .parentela .stipite { margin: 0 0 8px; line-height: 1.5; }
+.parentela .grado { display: inline-block; padding: 4px 10px; border-radius: 8px; background: var(--accento-chiaro); color: var(--accento); font-size: 14px; }
+.passi-parentela { list-style: none; margin: 0; padding: 0; }
+.passi-parentela li { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--linea); line-height: 1.4; }
+.passi-parentela .verso { width: 16px; flex: none; text-align: center; color: var(--accento); font-weight: 700; }
+.passi-parentela .parola { color: var(--tenue); font-size: 13px; min-width: 62px; flex: none; }
+
 .cornice-stampa { position: fixed; width: 0; height: 0; border: 0; visibility: hidden; }
 
 /* ------------------------------------------------ post-it */
@@ -425,6 +467,12 @@ select[size] { padding: 4px !important; }
   .comandi button { padding: 0 6px; }
   /* con il link di modifica le icone sono otto: «Cosa manca» resta nel Menu, la ricerca ha spazio */
   .modo-modifica #b-manca { display: none; }
+  /* «Come siamo parenti?»: con il link di modifica si apre dal Menu; mentre è attiva, nella barra
+     restano la ricerca e il suo pulsante, con la scritta */
+  .modo-modifica #b-parentela { display: none; }
+  .in-parentela .comandi button { display: none; }
+  .in-parentela .comandi #b-parentela { display: flex; padding: 0 12px; }
+  .in-parentela #b-parentela span { display: inline; }
   .marchio .logo { display: none; }
   #pannello {
     top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 72vh; border-radius: 18px 18px 0 0;

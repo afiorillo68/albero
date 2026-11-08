@@ -183,24 +183,28 @@ export function creaVista(svg, gestori = {}) {
     disegnaPostit();
   }
 
-  // classi: {selezionata, unioneSelezionata, arcoSelezionato, attenuati: Set, nascosti: Set, evidenziati: Set}
+  // classi: {selezionata, unioneSelezionata, arcoSelezionato, attenuati: Set, nascosti: Set, evidenziati: Set,
+  // trovati: Set, scelti: Set, percorso: {persone, unioni, archi}}; col percorso, unioni e linee fuori si attenuano
   function classi(c) {
     if (!scena) return;
     const att = c.attenuati || new Set(), nas = c.nascosti || new Set(), evi = c.evidenziati || new Set();
-    const tro = c.trovati || new Set();
+    const tro = c.trovati || new Set(), sce = c.scelti || new Set(), per = c.percorso;
     for (const [id, el] of elementi.persona) {
       el.classList.toggle("selezionata", c.selezionata === id);
       el.classList.toggle("attenuato", att.has(id));
       el.classList.toggle("nascosto", nas.has(id));
       el.classList.toggle("evidenziato", evi.has(id));
       el.classList.toggle("trovato", tro.has(id));
+      el.classList.toggle("scelta", sce.has(id));
+      el.classList.toggle("percorso", !!per?.persone.has(id));
     }
     const unione = new Map(scena.ix.unione);
     for (const [id, el] of elementi.unione) {
       const u = unione.get(id);
       el.classList.toggle("selezionata", c.unioneSelezionata === id);
       el.classList.toggle("nascosto", u.partner.every(p => nas.has(p)));
-      el.classList.toggle("attenuato", u.partner.every(p => att.has(p) || nas.has(p)));
+      el.classList.toggle("attenuato", per ? !per.unioni.has(id) : u.partner.every(p => att.has(p) || nas.has(p)));
+      el.classList.toggle("percorso", !!per?.unioni.has(id));
     }
     // i bollini seguono il riquadro a cui sono attaccati
     for (const [id, el] of elementi.postit) {
@@ -214,7 +218,8 @@ export function creaVista(svg, gestori = {}) {
       const fuori = s => s.has(a.persona) || (a.tipo === "figlio" && u.partner.every(p => s.has(p)));
       el.classList.toggle("selezionato", c.arcoSelezionato === a.id);
       el.classList.toggle("nascosto", fuori(nas));
-      el.classList.toggle("attenuato", fuori(new Set([...att, ...nas])));
+      el.classList.toggle("attenuato", per ? !per.archi.has(a.id) : fuori(new Set([...att, ...nas])));
+      el.classList.toggle("percorso", !!per?.archi.has(a.id));
     }
   }
 
