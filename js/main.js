@@ -16,6 +16,7 @@ import { mostraStorico } from "./storico.js";
 import { mostraTuttiPostit } from "./postit.js";
 import { CAMPI, GRUPPI, operatori, senzaValore, nuovaCondizione, criteriVuoti, completa, attiva as avanzataAttiva,
   valuta, contesto, descrivi } from "./ricerca.js";
+import { VERSIONE } from "./versione.js";
 
 const { W, H } = GEOMETRIA;
 const $ = s => document.querySelector(s);
@@ -119,6 +120,43 @@ function errore(err) {
   const permesso = /permission|insufficient/i.test(err?.message || "");
   avviso(permesso ? "Non salvato. Ricarica la pagina e riprova: se succede ancora, questo link non permette di modificare o è stato sostituito." :`Qualcosa non ha funzionato: ${err?.message || err}`, "errore");
 }
+
+// ------------------------------------------------------------ versione nuova
+// Una pagina aperta da prima di una pubblicazione gira con il codice vecchio finché non la si
+// ricarica: all'avvio, quando si torna sulla pagina e ogni mezz'ora si confronta la sua versione
+// con versione.txt e, se è cambiata, si propone di ricaricare.
+const versione = { controllata: 0, rinviata: 0 };
+
+async function controllaVersione() {
+  const ora = Date.now();
+  if (VERSIONE === "sviluppo" || !$("#versione").hidden || ora - versione.controllata < 60_000 || ora < versione.rinviata) return;
+  versione.controllata = ora;
+  try {
+    const r = await fetch("versione.txt", { cache: "no-store" });
+    const pubblicata = r.ok ? (await r.text()).trim() : "";
+    if (pubblicata && pubblicata !== VERSIONE) $("#versione").hidden = false;
+  } catch { /* fuori linea: si riprova al prossimo ritorno sulla pagina */ }
+}
+
+// ricaricare la pagina non basta: per qualche minuto dopo la pubblicazione il browser terrebbe
+// i file vecchi in memoria; prima li si riprende dalla rete, poi si ricarica
+async function ricarica() {
+  if ((S.pannello?.modulo || document.querySelector("dialog[open]"))
+    && !(await conferma("Ricaricando perdi quello che stai scrivendo e non hai ancora salvato. Ricarico adesso?", "Ricarica"))) return;
+  const file = performance.getEntriesByType("resource").map(e => e.name)
+    .filter(u => u.startsWith(location.origin) && /\.(js|css)$/.test(new URL(u).pathname));
+  await Promise.allSettled(file.map(u => fetch(u, { cache: "reload" })));
+  location.reload();
+}
+
+$("#versione").addEventListener("click", e => {
+  const b = e.target.closest("[data-versione]");
+  if (b?.dataset.versione === "ricarica") ricarica();
+  if (b?.dataset.versione === "dopo") { $("#versione").hidden = true; versione.rinviata = Date.now() + 30 * 60_000; }
+});
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") controllaVersione(); });
+window.addEventListener("focus", controllaVersione);
+setInterval(controllaVersione, 30 * 60_000);
 
 // ------------------------------------------------------------ disegno
 function ridisegna() {
@@ -806,6 +844,7 @@ async function avvia() {
           $("#avvio").hidden = true;
           inquadraVisibili({ animato: false, kMax: ZOOM_PIENO });
           apriDaIndirizzo();
+          controllaVersione();
         }
         // la scheda aperta segue le modifiche degli altri, ma non mentre la si compila
         const pan = S.pannello;

@@ -308,6 +308,18 @@ select[size] { padding: 4px !important; }
 .avviso.errore { background: var(--pericolo); }
 .avviso.via { opacity: 0; transform: translateY(8px); }
 
+/* versione nuova: invito a ricaricare una pagina aperta da prima dell'ultima pubblicazione */
+#versione {
+  position: fixed; left: 50%; transform: translateX(-50%); top: calc(var(--barra-h) + var(--nastro-h) + 12px); z-index: 30;
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px 12px;
+  width: max-content; max-width: calc(100vw - 32px); padding: 8px 8px 8px 16px; border-radius: var(--raggio);
+  background: #22313b; color: #fff; box-shadow: var(--ombra); font-size: 14px;
+}
+#versione button { border: 0; border-radius: 9px; padding: 7px 16px; cursor: pointer; font-weight: 600; background: #fff; color: var(--barra-1); }
+#versione button.chiudi { padding: 7px 10px; font-weight: 400; background: rgba(255, 255, 255, .15); color: #fff; }
+#attrezzi:not([hidden]) ~ #versione { top: calc(var(--barra-h) + var(--nastro-h) + 66px); }
+@media (min-width: 761px) { .con-pannello #versione { left: calc(50% - 212px); } }
+
 .cornice-stampa { position: fixed; width: 0; height: 0; border: 0; visibility: hidden; }
 
 /* ------------------------------------------------ post-it */
