@@ -646,7 +646,7 @@ function chiediNome(obbligatorio = false) {
 function mostraMenu() {
   const modifica = ctx.modifica;
   apriPannello("Menu", `<div class="menu">
-    <section><h3>Questo link</h3><p>${modifica ? "Puoi <b>leggere e modificare</b>. Non inoltrarlo: per far vedere l'albero a qualcuno c'è il link in sola lettura." : "Puoi <b>leggere</b> l'albero, non modificarlo."}</p></section>
+    <section><h3>Questo link</h3><p>${modifica ? "Puoi <b>leggere e modificare</b>. Non inoltrarlo: per far vedere l'albero a qualcuno c'è il link in sola lettura." : "Puoi <b>leggere</b> l'albero e <b>suggerire modifiche</b>: apri la scheda di una persona o di una coppia e tocca «Suggerisci una modifica» per correggere un dato o aggiungere un parente, oppure lascia un post-it con le notizie che sai. Chi cura l'albero li vede e aggiorna l'albero; se lasci la tua email, ti avvisa quando il suggerimento viene accettato o rifiutato."}</p></section>
     <section><h3>Il tuo nome</h3><p>${esc(memoria.leggi("nome") || "non indicato")} <button type="button" class="collegamento" data-azione="nome">cambia</button></p></section>
     ${modifica ? `<section><h3>Impostazioni dell'albero</h3>
       <label>Titolo <input name="titolo" value="${esc(S.albero.meta?.titolo || "")}"></label>
