@@ -157,7 +157,7 @@ export function aDrawio(scena, albero, oggi = new Date()) {
     const tooltip = [TESTO_IN_VITA[statoInVita(p, oggi)], ...date, p.note].filter(Boolean).join("\n");
     const stile = `rounded=1;whiteSpace=wrap;html=1;arcSize=12;fillColor=${n.riempimento};strokeColor=${n.bordo};fontSize=12;fontFamily=Helvetica;`
       + (n.tratteggiato ? "dashed=1;fontColor=#777777;" : "");
-    nodi.push(`<object id="p-${xa(n.id)}" label="${xa(etichettaHTML(n))}" nome="${xa(nomeCompleto(p))}" tooltip="${xa(tooltip)}"><mxCell style="${stile}" vertex="1" parent="1"><mxGeometry x="${r0(n.x)}" y="${r0(n.y)}" width="${n.w}" height="${n.h}" as="geometry"/></mxCell></object>`);
+    nodi.push(`<object id="p-${xa(n.id)}" label="${xa(etichettaHTML(n))}" nome="${xa(nomeCompleto(p))}" tooltip="${xa(tooltip)}"><mxCell style="${stile}" vertex="1" parent="1"><mxGeometry x="${r0(n.x)}" y="${r0(n.cima)}" width="${n.w}" height="${n.h}" as="geometry"/></mxCell></object>`);
   }
   return '<mxfile host="albero-di-famiglia">\n  <diagram id="albero" name="Albero di famiglia">\n'
     + '    <mxGraphModel dx="1400" dy="900" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" math="0" shadow="0">\n'

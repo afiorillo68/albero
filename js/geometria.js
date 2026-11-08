@@ -11,6 +11,11 @@ const fmt = n => (Math.round(n * 10) / 10).toString();
 
 export const centro = pos => ({ x: pos.x + W / 2, y: pos.y + H / 2 });
 
+// Un riquadro con più righe di testo è più alto di H e cresce in su e in giù di metà
+// ciascuno: pos.y resta la cima del riquadro normale, così il centro non si sposta.
+export const cimaDi = pos => pos.y + (H - (pos.h ?? H)) / 2;
+export const fondoDi = pos => pos.y + (H + (pos.h ?? H)) / 2;
+
 // Posizione (centro) del nodo di un'unione: quella salvata, altrimenti a metà fra i partner.
 export function posizioneUnione(u, nodi, posPersona) {
   if (nodi[u.id]) return nodi[u.id];
@@ -41,9 +46,9 @@ export function scartiBarre(unioni, generazione, posPersona) {
 // che guarda in quella direzione.
 export function ancoraRiquadro(pos, verso) {
   const c = centro(pos);
-  const dx = (verso.x - c.x) / W, dy = (verso.y - c.y) / H;
+  const dx = (verso.x - c.x) / W, dy = (verso.y - c.y) / (pos.h ?? H);
   if (Math.abs(dx) >= Math.abs(dy)) return { x: dx >= 0 ? pos.x + W : pos.x, y: c.y };
-  return { x: c.x, y: dy >= 0 ? pos.y + H : pos.y };
+  return { x: c.x, y: dy >= 0 ? fondoDi(pos) : cimaDi(pos) };
 }
 
 // Arco fra un partner e il nodo dell'unione: dal lato del riquadro, per i vertici salvati.
@@ -56,7 +61,7 @@ export function percorsoPartner(posP, pu, punti = []) {
 // fratelli, la percorre e scende al figlio.
 export function percorsoFiglio(pu, posF, yBarra, punti = null) {
   const inizio = { x: pu.x, y: pu.y + NODO / 2 };
-  const fine = { x: posF.x + W / 2, y: posF.y };
+  const fine = { x: posF.x + W / 2, y: cimaDi(posF) };
   if (punti && punti.length) return [inizio, ...punti, fine];
   // figlio quasi in asse con il nodo: si scende dritti, senza uno scalino di pochi pixel
   if (Math.abs(fine.x - inizio.x) < NODO / 2) return [{ x: fine.x, y: inizio.y }, fine];
@@ -65,8 +70,8 @@ export function percorsoFiglio(pu, posF, yBarra, punti = null) {
 
 // Altezza della barra dei fratelli: a metà fra il fondo dei genitori e il figlio più alto.
 export function altezzaBarra(u, posPersona, scarto = 0) {
-  const fondo = Math.max(...u.partner.map(p => posPersona(p).y)) + H;
-  const cima = Math.min(...u.figli.map(f => posPersona(f).y));
+  const fondo = Math.max(...u.partner.map(p => fondoDi(posPersona(p))));
+  const cima = Math.min(...u.figli.map(f => cimaDi(posPersona(f))));
   return (fondo + cima) / 2 + scarto;
 }
 
@@ -131,8 +136,8 @@ export function fasce(generazione, posizioni) {
     if (g === undefined) continue;
     if (!perGen.has(g)) perGen.set(g, { cima: Infinity, fondo: -Infinity });
     const f = perGen.get(g);
-    f.cima = Math.min(f.cima, pos.y - MARGINE_FASCIA);
-    f.fondo = Math.max(f.fondo, pos.y + H + MARGINE_FASCIA);
+    f.cima = Math.min(f.cima, cimaDi(pos) - MARGINE_FASCIA);
+    f.fondo = Math.max(f.fondo, fondoDi(pos) + MARGINE_FASCIA);
     minX = Math.min(minX, pos.x);
     maxX = Math.max(maxX, pos.x + W);
   }

@@ -8,18 +8,16 @@ export const CARATTERE = "-apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', A
 
 export const esc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+// le righe già mandate a capo e le loro linee di base vengono dalla scena (impaginaTesto)
 function testoRiquadro(n) {
-  const righe = n.righe;
-  // due o tre righe centrate nel riquadro
-  const ys = righe.length === 1 ? [n.h / 2 + 4] : righe.length === 2 ? [n.h / 2 - 4, n.h / 2 + 12] : [17, 32, 47];
-  return righe.map((parti, i) => {
+  return n.righe.map((parti, i) => {
     const pezzi = parti.map(p => {
       const st = [p.grassetto && 'font-weight="600"', p.corsivo && 'font-style="italic"',
         p.grigio && 'fill="#7a7a7a"'].filter(Boolean).join(" ");
       return `<tspan ${st}>${esc(p.testo)}</tspan>`;
     }).join("");
     const dim = parti.some(p => p.piccolo) ? 10.5 : 12.5;
-    return `<text x="${n.w / 2}" y="${ys[i]}" text-anchor="middle" font-size="${dim}">${pezzi}</text>`;
+    return `<text x="${n.w / 2}" y="${n.basi[i]}" text-anchor="middle" font-size="${dim}">${pezzi}</text>`;
   }).join("");
 }
 
@@ -52,7 +50,7 @@ export function strati(scena, { interattivo = false } = {}) {
 
   const nodi = scena.nodi.map(n => {
     const attr = interattivo ? ` data-persona="${esc(n.id)}"` : "";
-    return `<g class="nodo${n.morto ? " morto" : ""}${n.tratteggiato ? " ignoto" : ""}"${attr} transform="translate(${n.x} ${n.y})">`
+    return `<g class="nodo${n.morto ? " morto" : ""}${n.tratteggiato ? " ignoto" : ""}"${attr} transform="translate(${n.x} ${n.cima})">`
       + `<rect class="riquadro" width="${n.w}" height="${n.h}" rx="9" fill="${esc(n.riempimento)}" stroke="${esc(n.bordo)}"`
       + ` stroke-width="1.4"${n.tratteggiato ? ' stroke-dasharray="5 3"' : ""}/>`
       + testoRiquadro(n) + `</g>`;

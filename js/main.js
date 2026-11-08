@@ -141,8 +141,8 @@ function riserva() {
 }
 
 const ZOOM_PIENO = 1.2;          // inquadrando non si va oltre i riquadri a grandezza piena
-const ingombro = nodi => ({ x: Math.min(...nodi.map(n => n.x)), y: Math.min(...nodi.map(n => n.y)),
-  x2: Math.max(...nodi.map(n => n.x + W)), y2: Math.max(...nodi.map(n => n.y + H)) });
+const ingombro = nodi => ({ x: Math.min(...nodi.map(n => n.x)), y: Math.min(...nodi.map(n => n.cima)),
+  x2: Math.max(...nodi.map(n => n.x + W)), y2: Math.max(...nodi.map(n => n.cima + n.h)) });
 
 // Inquadra un gruppo di persone stretto, con un piccolo margine. Si avvicina fino alla
 // grandezza piena, o fino allo zoom attuale se è già più vicino: mai oltre.
@@ -523,6 +523,7 @@ async function avvia() {
       else { S.sel = null; S.selUnione = null; chiudiPannello(); applicaClassi(); }
     },
     doppioClic: b => disposizione.doppioClic(b),
+    riserva: () => riserva(),
     suZoom: () => disposizione.disegnaManiglie(),
   });
   disposizione = creaDisposizione(ctx);

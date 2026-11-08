@@ -151,10 +151,45 @@ export function creaVista(svg, gestori = {}) {
   const puntatori = new Map();
   let gesto = null;     // {tipo: "sposta"|"pizzica"|"trascina", ...}
 
+  // Trascinando vicino a un bordo la vista scorre piano, più veloce quanto più ci si avvicina;
+  // i bordi sono quelli dell'area libera, al netto di intestazioni e pannello.
+  const BORDO = 56, VELOCITA = 6;        // pixel dal bordo; pixel per fotogramma al massimo
+  let scorrimento = null;
+  function velocitaBordo(cx, cy) {
+    const r = svg.getBoundingClientRect(), ris = gestori.riserva?.() || {};
+    const v = d => (d < BORDO ? VELOCITA * Math.min(1, 1 - d / BORDO) : 0);
+    return {
+      vx: v(cx - r.left - (ris.sinistra || 0)) - v(r.right - (ris.destra || 0) - cx),
+      vy: v(cy - r.top) - v(r.bottom - (ris.basso || 0) - cy),
+    };
+  }
+  function passoScorrimento() {
+    scorrimento = null;
+    if (gesto?.tipo !== "trascina" || !gesto.mosso) return;
+    const e = gesto.ultimo;
+    const { vx, vy } = velocitaBordo(e.clientX, e.clientY);
+    if (!vx && !vy) return;
+    t = { ...t, x: t.x + vx, y: t.y + vy };
+    applica();
+    gestori.trascina?.("muovi", daSchermo(e.clientX, e.clientY), e, gesto.b);
+    scorrimento = requestAnimationFrame(passoScorrimento);
+  }
+
+  // Un gesto rimasto aperto, perché il rilascio non è arrivato (per esempio uno screenshot
+  // fatto trascinando), si chiude salvando quello che si vede, prima di cominciarne un altro.
+  function chiudiInterrotto() {
+    if (gesto?.tipo === "trascina" && gesto.mosso) gestori.trascina?.("fine", daSchermo(gesto.ultimo.clientX, gesto.ultimo.clientY), gesto.ultimo, gesto.b);
+    cancelAnimationFrame(scorrimento); scorrimento = null;
+    svg.classList.remove("in-movimento");
+    gesto = null;
+    puntatori.clear();
+  }
+
   svg.addEventListener("pointerdown", e => {
     if (e.button !== 0 && e.pointerType === "mouse") return;
+    if (puntatori.has(e.pointerId) || (e.pointerType === "mouse" && [...puntatori.values()].some(p => p.mouse))) chiudiInterrotto();
     svg.setPointerCapture(e.pointerId);
-    puntatori.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    puntatori.set(e.pointerId, { x: e.clientX, y: e.clientY, mouse: e.pointerType === "mouse" });
     if (puntatori.size === 2) {
       if (gesto?.tipo === "trascina") gestori.trascina?.("annulla", null, e);
       const [a, b] = [...puntatori.values()];
@@ -172,7 +207,7 @@ export function creaVista(svg, gestori = {}) {
 
   svg.addEventListener("pointermove", e => {
     if (!puntatori.has(e.pointerId)) return;
-    puntatori.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    puntatori.set(e.pointerId, { x: e.clientX, y: e.clientY, mouse: e.pointerType === "mouse" });
     if (!gesto) return;
     if (gesto.tipo === "pizzica" && puntatori.size === 2) {
       const [a, b] = [...puntatori.values()];
@@ -193,7 +228,9 @@ export function creaVista(svg, gestori = {}) {
     } else if (gesto.tipo === "trascina") {
       if (!gesto.mosso) gestori.trascina?.("inizio", daSchermo(gesto.inizio.x, gesto.inizio.y), e, gesto.b);
       gesto.mosso = true;
+      gesto.ultimo = e;
       gestori.trascina?.("muovi", daSchermo(e.clientX, e.clientY), e, gesto.b);
+      if (!scorrimento) scorrimento = requestAnimationFrame(passoScorrimento);
     }
   });
 
@@ -217,15 +254,20 @@ export function creaVista(svg, gestori = {}) {
   function fine(e) {
     if (!puntatori.has(e.pointerId)) return;
     puntatori.delete(e.pointerId);
+    cancelAnimationFrame(scorrimento); scorrimento = null;
     if (!gesto) return;
     if (gesto.tipo === "pizzica") { if (puntatori.size === 0) gesto = null; return; }
-    if (gesto.tipo === "trascina" && gesto.mosso) gestori.trascina?.("fine", daSchermo(e.clientX, e.clientY), e, gesto.b);
-    else if (!gesto.mosso && e.type === "pointerup") clicOdoppio(gesto.b, e);
+    if (gesto.tipo === "trascina" && gesto.mosso) {
+      const ultimo = e.type === "pointerup" ? e : gesto.ultimo;      // dopo un annullamento le coordinate possono mancare
+      gestori.trascina?.("fine", daSchermo(ultimo.clientX, ultimo.clientY), ultimo, gesto.b);
+    } else if (!gesto.mosso && e.type === "pointerup") clicOdoppio(gesto.b, e);
     svg.classList.remove("in-movimento");
     gesto = null;
   }
   svg.addEventListener("pointerup", fine);
   svg.addEventListener("pointercancel", fine);
+  // se il browser toglie la cattura senza un rilascio (finestra che perde il puntatore), si chiude lo stesso
+  svg.addEventListener("lostpointercapture", fine);
 
   svg.addEventListener("wheel", e => {
     e.preventDefault();

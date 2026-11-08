@@ -382,7 +382,16 @@ async function aggiungiGenitori(ctx, id) {
 async function eliminaPersona(ctx, id) {
   const ix = ctx.indici();
   const p = ix.persona.get(id);
-  const ok = await ctx.conferma(`Elimino ${nomeCompleto(p)} dall'albero? Le unioni con figli restano, con un genitore «non noto» al suo posto. Potrai annullare dallo storico.`, "Elimina", true);
+  // Un genitore «non noto» non si sostituisce con un altro «non noto»: se ne va con le sue
+  // unioni, e i figli restano nell'albero senza quei genitori.
+  const nonNoto = ignoto(p);
+  const conFigli = (ix.unioniDi.get(id) || []).map(uid => ix.unione.get(uid)).filter(u => u.figli.length);
+  const figliDi = conFigli.flatMap(u => u.figli.map(f => nomeCompleto(ix.persona.get(f))));
+  const domanda = nonNoto && conFigli.length
+    ? `Tolgo questo genitore non noto insieme alla sua unione? ${figliDi.join(", ")} ${figliDi.length > 1 ? "restano" : "resta"} nell'albero, senza questi genitori. Potrai annullare dallo storico.`
+    : nonNoto ? "Elimino questo «non noto» dall'albero? Potrai annullare dallo storico."
+    : `Elimino ${nomeCompleto(p)} dall'albero? Le unioni con figli restano, con un genitore «non noto» al suo posto. Potrai annullare dallo storico.`;
+  const ok = await ctx.conferma(domanda, nonNoto && conFigli.length ? "Togli" : "Elimina", true);
   if (!ok) return;
   const albero = ctx.albero();
   const operazioni = [{ raccolta: "persone", id, dopo: null }];
@@ -391,7 +400,12 @@ async function eliminaPersona(ctx, id) {
   for (const uid of ix.unioniDi.get(id) || []) {
     const u = ix.unione.get(uid);
     disposizione.push({ sezione: "archi", id: idArcoPartner(id, uid), dopo: null });
-    if (u.figli.length) {
+    if (u.figli.length && nonNoto) {
+      operazioni.push({ raccolta: "unioni", id: uid, dopo: null });
+      disposizione.push({ sezione: "nodi", id: uid, dopo: null });
+      for (const q of u.partner) disposizione.push({ sezione: "archi", id: idArcoPartner(q, uid), dopo: null });
+      for (const f of u.figli) disposizione.push({ sezione: "archi", id: idArcoFiglio(uid, f), dopo: null });
+    } else if (u.figli.length) {
       const segnaposto = nuovaPersona(albero);
       segnaposto.id += uid.slice(-3);
       operazioni.push({ raccolta: "persone", id: segnaposto.id, dopo: segnaposto });
@@ -409,7 +423,9 @@ async function eliminaPersona(ctx, id) {
     operazioni.push({ raccolta: "unioni", id: ug, dopo: { ...u, figli: u.figli.filter(f => f !== id) } });
     disposizione.push({ sezione: "archi", id: idArcoFiglio(ug, id), dopo: null });
   }
-  await ctx.salva({ operazioni, disposizione: dedup(disposizione), descrizione: `Eliminata ${nomeCompleto(p)}` });
+  const descrizione = !nonNoto ? `Eliminata ${nomeCompleto(p)}`
+    : figliDi.length ? `Tolto il genitore non noto di ${figliDi.join(", ")}` : "Eliminato un «non noto»";
+  await ctx.salva({ operazioni, disposizione: dedup(disposizione), descrizione });
   ctx.seleziona(null);
 }
 
