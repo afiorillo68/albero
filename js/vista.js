@@ -51,17 +51,19 @@ export function creaVista(svg, gestori = {}) {
     animazione = requestAnimationFrame(passo);
   }
 
-  function inquadra(box, { margine = 40, animato = true, kMax = 1.2 } = {}) {
+  // destra e basso: pixel coperti dal pannello, da lasciare fuori dall'inquadratura
+  function inquadra(box, { margine = 40, animato = true, kMax = 1.2, destra = 0, basso = 0 } = {}) {
     const r = svg.getBoundingClientRect();
+    const lw = Math.max(80, r.width - destra), lh = Math.max(80, r.height - basso);
     const w = Math.max(1, box.x2 - box.x), h = Math.max(1, box.y2 - box.y);
-    const k = limitaK(Math.min((r.width - 2 * margine) / w, (r.height - 2 * margine) / h, kMax));
-    const dest = { k, x: (r.width - w * k) / 2 - box.x * k, y: (r.height - h * k) / 2 - box.y * k };
+    const k = limitaK(Math.min((lw - 2 * margine) / w, (lh - 2 * margine) / h, kMax));
+    const dest = { k, x: (lw - w * k) / 2 - box.x * k, y: (lh - h * k) / 2 - box.y * k };
     if (animato) animaVerso(dest); else { t = dest; applica(); gestori.suZoom?.(t.k); }
   }
 
-  function centraSu(x, y, k = Math.max(t.k, 0.9)) {
+  function centraSu(x, y, { k = t.k, destra = 0, basso = 0 } = {}) {
     const r = svg.getBoundingClientRect();
-    animaVerso({ k, x: r.width / 2 - x * k, y: r.height / 2 - y * k });
+    animaVerso({ k, x: (r.width - destra) / 2 - x * k, y: (r.height - basso) / 2 - y * k });
   }
 
   function disegna(nuova) {
@@ -81,11 +83,13 @@ export function creaVista(svg, gestori = {}) {
   function classi(c) {
     if (!scena) return;
     const att = c.attenuati || new Set(), nas = c.nascosti || new Set(), evi = c.evidenziati || new Set();
+    const tro = c.trovati || new Set();
     for (const [id, el] of elementi.persona) {
       el.classList.toggle("selezionata", c.selezionata === id);
       el.classList.toggle("attenuato", att.has(id));
       el.classList.toggle("nascosto", nas.has(id));
       el.classList.toggle("evidenziato", evi.has(id));
+      el.classList.toggle("trovato", tro.has(id));
     }
     const unione = new Map(scena.ix.unione);
     for (const [id, el] of elementi.unione) {

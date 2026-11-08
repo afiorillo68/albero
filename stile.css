@@ -120,6 +120,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .nodo.morto .riquadro { fill-opacity: .85; }
 .nodo.selezionata .riquadro { stroke: var(--barra-1); stroke-width: 3; filter: drop-shadow(0 4px 12px rgba(31, 58, 77, .35)); }
 .nodo.evidenziato .riquadro { animation: pulsa 0.6s ease-in-out 3; }
+.nodo.trovato .riquadro { stroke: #e0a100; stroke-width: 3.5; }
 @keyframes pulsa { 50% { stroke-width: 6; stroke: #e0a100; } }
 .attenuato { opacity: .13; }
 .nascosto { display: none; }

@@ -45,7 +45,7 @@ function schermata(titolo, testo, attesa = false) {
 const S = {
   albero: null, scena: null, sel: null, selUnione: null,
   filtri: filtriVuoti(), isolamento: null, soloVisibili: false, ricompatta: null,
-  provvisorie: { posizioni: {}, archi: {} }, pulire: false, evidenziati: new Set(),
+  provvisorie: { posizioni: {}, archi: {} }, pulire: false, evidenziati: new Set(), trovati: new Set(),
   pannello: null, primoDisegno: true,
 };
 let dati = null, vista = null, disposizione = null;
@@ -126,18 +126,32 @@ function applicaClassi() {
   const v = visibilita(S.albero, S.scena, S.filtri, S.isolamento, S.soloVisibili);
   S.dentro = v.dentro;
   vista.classi({ selezionata: S.sel, unioneSelezionata: S.selUnione, arcoSelezionato: disposizione.stato().arcoSel,
-    attenuati: v.attenuati, nascosti: v.nascosti, evidenziati: S.evidenziati });
+    attenuati: v.attenuati, nascosti: v.nascosti, evidenziati: S.evidenziati, trovati: S.trovati });
   aggiornaNastro();
 }
 
-function inquadraVisibili(animato = true) {
-  if (!S.scena) return;
-  const nodi = S.dentro ? S.scena.nodi.filter(n => S.dentro.has(n.id)) : S.scena.nodi;
+// Spazio coperto dal pannello aperto: a destra sullo schermo largo, in basso sul telefono.
+function riserva() {
+  const p = $("#pannello");
+  if (p.hidden) return { destra: 0, basso: 0 };
+  const r = p.getBoundingClientRect(), area = $("#tela").getBoundingClientRect();
+  return innerWidth > 760 ? { destra: Math.max(0, area.right - r.left + 10), basso: 0 } : { destra: 0, basso: Math.max(0, area.bottom - r.top) };
+}
+
+// Inquadra un gruppo di persone. Senza kMax non si avvicina oltre lo zoom attuale:
+// ricerca, filtri e isolamento allargano la vista se serve, ma non la stringono.
+function inquadraPersone(ids, { animato = true, kMax = vista.scala() } = {}) {
+  const nodi = S.scena.nodi.filter(n => ids.has(n.id));
   if (!nodi.length) return;
-  const box = S.dentro
-    ? { x: Math.min(...nodi.map(n => n.x)) - 60, y: Math.min(...nodi.map(n => n.y)) - 60, x2: Math.max(...nodi.map(n => n.x + W)) + 60, y2: Math.max(...nodi.map(n => n.y + H)) + 60 }
-    : S.scena.bbox;
-  vista.inquadra(box, { animato });
+  const box = { x: Math.min(...nodi.map(n => n.x)) - 30, y: Math.min(...nodi.map(n => n.y)) - 30,
+    x2: Math.max(...nodi.map(n => n.x + W)) + 30, y2: Math.max(...nodi.map(n => n.y + H)) + 30 };
+  vista.inquadra(box, { animato, kMax, ...riserva() });
+}
+
+function inquadraVisibili(opzioni = {}) {
+  if (!S.scena) return;
+  if (S.dentro) inquadraPersone(S.dentro, opzioni);
+  else vista.inquadra(S.scena.bbox, { animato: opzioni.animato ?? true, kMax: opzioni.kMax ?? 1.2, ...riserva() });
 }
 
 // ------------------------------------------------------------ selezione e isolamento
@@ -149,7 +163,7 @@ function seleziona(id, { centra = false, pannello = true } = {}) {
   if (pannello) mostraPersona(ctx, id);
   if (centra) {
     const n = S.scena.nodi.find(x => x.id === id);
-    if (n) vista.centraSu(n.x + W / 2, n.y + H / 2);
+    if (n) vista.centraSu(n.x + W / 2, n.y + H / 2, riserva());
     S.evidenziati = new Set([id]);
     applicaClassi();
     setTimeout(() => { S.evidenziati = new Set(); applicaClassi(); }, 1800);
@@ -199,6 +213,7 @@ $("#nastro").addEventListener("click", e => {
     s.has(f.dataset.famiglia) ? s.delete(f.dataset.famiglia) : s.add(f.dataset.famiglia);
     applicaClassi();
     if (S.pannello?.tipo === "filtri") mostraFiltri();
+    if (S.dentro) inquadraVisibili();
     return;
   }
   const b = e.target.closest("[data-nastro]");
@@ -235,6 +250,7 @@ function mostraFiltri() {
     }
     applicaClassi();
     mostraFiltri();
+    if (azione === "filtro" && S.dentro) inquadraVisibili();
   }, null, { tipo: "filtri" });
 }
 
@@ -251,13 +267,27 @@ function preparaRicerca() {
       return `<li data-id="${esc(p.id)}" class="${i === scelto ? "scelto" : ""}"><span class="pallino" style="background:${c?.riempimento || "#fff"};border-color:${c?.bordo || "#666"}"></span>${esc(nomeCompleto(p))}${statoInVita(p) === "no" ? " †" : ""}${anni}</li>`;
     }).join("");
   };
-  const vai = p => { if (!p) return; campo.value = ""; trovati = []; disegna(); campo.blur(); seleziona(p.id, { centra: true }); };
-  campo.addEventListener("input", () => { trovati = S.albero ? cerca(S.albero, campo.value).slice(0, 8) : []; scelto = 0; disegna(); });
+  // mentre si scrive, i risultati si evidenziano e la vista ne inquadra l'area (mai più vicino di ora)
+  let attesa = null;
+  const segna = tutti => {
+    S.trovati = new Set(tutti.map(p => p.id));
+    applicaClassi();
+    clearTimeout(attesa);
+    if (S.trovati.size) attesa = setTimeout(() => inquadraPersone(S.trovati), 250);
+  };
+  const vai = p => { if (!p) return; campo.value = ""; trovati = []; disegna(); segna([]); campo.blur(); seleziona(p.id, { centra: true }); };
+  campo.addEventListener("input", () => {
+    const tutti = S.albero ? cerca(S.albero, campo.value) : [];
+    trovati = tutti.slice(0, 8);
+    scelto = 0;
+    disegna();
+    segna(tutti);
+  });
   campo.addEventListener("keydown", e => {
     if (e.key === "ArrowDown") { scelto = Math.min(scelto + 1, trovati.length - 1); disegna(); e.preventDefault(); }
     if (e.key === "ArrowUp") { scelto = Math.max(scelto - 1, 0); disegna(); e.preventDefault(); }
     if (e.key === "Enter") vai(trovati[scelto]);
-    if (e.key === "Escape") { campo.value = ""; trovati = []; disegna(); campo.blur(); }
+    if (e.key === "Escape") { campo.value = ""; trovati = []; disegna(); segna([]); campo.blur(); }
   });
   lista.addEventListener("pointerdown", e => { const li = e.target.closest("li"); if (li) { e.preventDefault(); vai(S.albero.persone.find(p => p.id === li.dataset.id)); } });
   campo.addEventListener("blur", () => setTimeout(() => { lista.hidden = true; }, 150));
@@ -501,7 +531,7 @@ async function avvia() {
         if (S.primoDisegno) {
           S.primoDisegno = false;
           $("#avvio").hidden = true;
-          inquadraVisibili(false);
+          inquadraVisibili({ animato: false, kMax: 1.2 });
         }
         // la scheda aperta segue le modifiche degli altri, ma non mentre la si compila
         const pan = S.pannello;
@@ -539,7 +569,7 @@ async function avvia() {
   $("#b-disposizione").addEventListener("click", () => attivaDisposizione(!disposizione.attivo));
   $("#z-piu").addEventListener("click", () => vista.zoom(1.25));
   $("#z-meno").addEventListener("click", () => vista.zoom(0.8));
-  $("#z-adatta").addEventListener("click", () => inquadraVisibili());
+  $("#z-adatta").addEventListener("click", () => inquadraVisibili({ kMax: 1.2 }));
 
   document.addEventListener("keydown", e => {
     const inCampo = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || document.querySelector("dialog[open]");
