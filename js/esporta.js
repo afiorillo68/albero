@@ -173,11 +173,12 @@ const cella = v => {
 };
 const csv = righe => "﻿" + righe.map(r => r.map(cella).join(";")).join("\r\n") + "\r\n";
 
-export function aCSVPersone(albero, oggi = new Date()) {
+// solo: insieme di id da esportare (i risultati di una ricerca); senza, tutte le persone
+export function aCSVPersone(albero, oggi = new Date(), solo = null) {
   const ix = indici(albero);
   const testa = ["id", "nome", "cognome", "soprannome", "sesso", "nascita", "luogo di nascita", "morte",
     "luogo di morte", "in vita (dedotto)", "genitori", "note"];
-  const righe = [...albero.persone].sort(perOrdine).map(p => {
+  const righe = albero.persone.filter(p => !solo || solo.has(p.id)).sort(perOrdine).map(p => {
     const ug = ix.unione.get(ix.genitoriDi.get(p.id));
     return [p.id, p.nome, p.cognome, p.soprannome, p.sesso, formattaData(p.nascita), p.nascita?.luogo,
       formattaData(p.morte), p.morte?.luogo, TESTO_IN_VITA[statoInVita(p, oggi)],

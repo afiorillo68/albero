@@ -13,6 +13,8 @@ import { ingressoLayout, annoDi, statoInVita } from "./deduzioni.js";
 import { filtriVuoti, attivi, visibilita, descriviIsolamento, ALTRI, MANCANTI, VOCI_VITA } from "./filtri.js";
 import { mostraPersona, mostraUnione, nuovaPersonaLibera } from "./scheda.js";
 import { mostraStorico } from "./storico.js";
+import { CAMPI, GRUPPI, operatori, senzaValore, nuovaCondizione, criteriVuoti, completa, attiva as avanzataAttiva,
+  valuta, contesto, descrivi } from "./ricerca.js";
 
 const { W, H } = GEOMETRIA;
 const $ = s => document.querySelector(s);
@@ -46,6 +48,8 @@ const S = {
   albero: null, scena: null, sel: null, selUnione: null,
   filtri: filtriVuoti(), isolamento: null, soloVisibili: false, ricompatta: null,
   provvisorie: { posizioni: {}, archi: {} }, pulire: false, evidenziati: new Set(), trovati: new Set(),
+  // ricerca avanzata: i criteri in modifica nel pannello e quelli applicati all'albero
+  avanzata: criteriVuoti(), avanzataApplicata: null, esitoAvanzata: null,
   pannello: null, primoDisegno: true,
 };
 let dati = null, vista = null, disposizione = null;
@@ -121,13 +125,20 @@ function ridisegna() {
   disposizione.disegnaManiglie();
 }
 
+const risultatiAvanzati = criteri => (S.scena && avanzataAttiva(criteri) ? valuta(S.albero, contesto(S.scena), criteri) : null);
+
 function applicaClassi() {
   if (!S.scena) return;
-  const v = visibilita(S.albero, S.scena, S.filtri, S.isolamento, S.soloVisibili);
+  S.esitoAvanzata = risultatiAvanzati(S.avanzataApplicata);
+  const v = visibilita(S.albero, S.scena, S.filtri, S.isolamento, S.soloVisibili, new Date(), S.esitoAvanzata);
   S.dentro = v.dentro;
+  // chi passa la ricerca avanzata (e i filtri) brilla come i risultati della ricerca veloce
+  const trovati = S.esitoAvanzata ? new Set([...S.trovati, ...v.dentro]) : S.trovati;
   vista.classi({ selezionata: S.sel, unioneSelezionata: S.selUnione, arcoSelezionato: disposizione.stato().arcoSel,
-    attenuati: v.attenuati, nascosti: v.nascosti, evidenziati: S.evidenziati, trovati: S.trovati });
+    attenuati: v.attenuati, nascosti: v.nascosti, evidenziati: S.evidenziati, trovati });
   aggiornaNastro();
+  $("#b-avanzata")?.classList.toggle("attiva", !!S.esitoAvanzata);
+  aggiornaEsitiAvanzata();
 }
 
 // Spazio coperto da intestazioni delle generazioni (a sinistra) e pannello aperto
@@ -204,10 +215,12 @@ function aggiornaNastro() {
     + `<button type="button" class="chip legenda${fam.has(ALTRI) ? " attiva" : ""}" data-famiglia="${ALTRI}" style="--c:#fff;--b:#666">altri</button>`;
   const iso = S.isolamento ? `<span class="pillola">${esc(descriviIsolamento(S.scena, S.isolamento))}<button type="button" data-nastro="togli-isola" title="Togli l'isolamento">✕</button></span>` : "";
   const fil = attivi(S.filtri) ? `<span class="pillola">Filtri attivi<button type="button" data-nastro="azzera" title="Azzera i filtri">✕</button></span>` : "";
-  const qualcosa = S.isolamento || attivi(S.filtri);
+  const n = S.esitoAvanzata?.size;
+  const avz = S.esitoAvanzata ? `<span class="pillola"><button type="button" class="testo" data-nastro="apri-avanzata" title="${esc(descrivi(S.avanzataApplicata, contesto(S.scena)))}">Ricerca avanzata: ${n === 1 ? "1 persona" : `${n} persone`}</button><button type="button" data-nastro="togli-avanzata" title="Togli la ricerca avanzata">✕</button></span>` : "";
+  const qualcosa = S.isolamento || attivi(S.filtri) || S.esitoAvanzata;
   const modo = qualcosa ? `<label class="spunta piccola"><input type="checkbox" data-nastro="solo"${S.soloVisibili ? " checked" : ""}> mostra solo</label>`
     + (S.soloVisibili && S.isolamento ? `<label class="spunta piccola"><input type="checkbox" data-nastro="ricompatta"${S.ricompatta ? " checked" : ""}> ricompatta</label>` : "") : "";
-  $("#nastro").innerHTML = `<div class="legenda-chips">${chips}</div><div class="nastro-stato">${iso}${fil}${modo}</div>`;
+  $("#nastro").innerHTML = `<div class="legenda-chips">${chips}</div><div class="nastro-stato">${iso}${avz}${fil}${modo}</div>`;
 }
 
 $("#nastro").addEventListener("click", e => {
@@ -224,6 +237,12 @@ $("#nastro").addEventListener("click", e => {
   if (!b || b.tagName === "INPUT") return;
   if (b.dataset.nastro === "togli-isola") togliIsolamento();
   if (b.dataset.nastro === "azzera") { S.filtri = filtriVuoti(); applicaClassi(); if (S.pannello?.tipo === "filtri") mostraFiltri(); }
+  if (b.dataset.nastro === "apri-avanzata") mostraAvanzata();
+  if (b.dataset.nastro === "togli-avanzata") {
+    S.avanzata = criteriVuoti();
+    applicaAvanzata();
+    if (S.pannello?.tipo === "avanzata") mostraAvanzata();
+  }
 });
 $("#nastro").addEventListener("change", e => {
   const n = e.target.dataset.nastro;
@@ -245,7 +264,9 @@ function mostraFiltri() {
     ${gruppo("Generazione", "generazioni", generazioni, gen)}
     ${gruppo("In vita", "vita", VOCI_VITA, f.vita)}
     ${gruppo("Dati da completare", "mancanti", Object.entries(MANCANTI).map(([k, v]) => [k, v.testo]), f.mancanti)}
+    <p class="spiegazione">Per combinare condizioni su tutti i campi c'è la <button type="button" class="collegamento" data-azione="avanzata">ricerca avanzata</button>.</p>
     <div class="azioni"><button type="button" data-azione="azzera">Azzera i filtri</button></div></div>`, (azione, el) => {
+    if (azione === "avanzata") return mostraAvanzata();
     if (azione === "azzera") S.filtri = filtriVuoti();
     if (azione === "filtro") {
       const g = el.dataset.gruppo;
@@ -259,6 +280,179 @@ function mostraFiltri() {
 }
 
 // ------------------------------------------------------------ ricerca
+const ATTESA_RICERCA = 750;      // ms dall'ultimo tasto prima di evidenziare e inquadrare
+
+const perCognome = (a, b) => (a.cognome || "￿").localeCompare(b.cognome || "￿", "it") || (a.nome || "").localeCompare(b.nome || "", "it");
+
+function rigaPersona(p) {
+  const c = S.scena.ix.ceppi.get(p.cognome);
+  const n = annoDi(p.nascita?.data), m = annoDi(p.morte?.data);
+  return `<span class="pallino" style="background:${c?.riempimento || "#fff"};border-color:${c?.bordo || "#666"}"></span>`
+    + `<span class="nome-esito">${esc(nomeCompleto(p))}${statoInVita(p) === "no" ? " †" : ""}</span>`
+    + (n || m ? `<span class="anni">${n || "?"}${m ? `–${m}` : ""}</span>` : "");
+}
+
+// ------------------------------------------------------------ ricerca avanzata
+// I criteri si modificano nel pannello e si applicano all'albero subito per scelte e
+// pulsanti, dopo una pausa mentre si scrive; poi la vista inquadra i risultati e li increspa.
+let attesaAvanzata = null;
+function applicaAvanzata(ritardo = 0) {
+  clearTimeout(attesaAvanzata);
+  attesaAvanzata = setTimeout(() => {
+    S.avanzataApplicata = avanzataAttiva(S.avanzata) ? structuredClone(S.avanzata) : null;
+    applicaClassi();
+    if (S.esitoAvanzata && S.dentro?.size) {
+      const ids = new Set(S.dentro);
+      inquadraPersone(ids);
+      setTimeout(() => vista.increspa(ids), 120);
+    }
+  }, ritardo);
+}
+
+function htmlEsitiAvanzata() {
+  const ids = risultatiAvanzati(S.avanzata);
+  if (!ids) return `<p class="spiegazione">Compila almeno una condizione: quelle a metà, col bordo tratteggiato, non contano.</p>`;
+  const persone = S.albero.persone.filter(p => ids.has(p.id)).sort(perCognome);
+  if (!persone.length) return `<h3>Risultati</h3><p class="spiegazione">Nessuna persona corrisponde.</p>`;
+  const altri = [attivi(S.filtri) && "i filtri", S.isolamento && "l'isolamento"].filter(Boolean);
+  const anche = altri.length ? `<p class="spiegazione">Sull'albero ${attivi(S.filtri) ? "contano" : "conta"} anche ${altri.join(" e ")}; questo elenco no.</p>` : "";
+  return `<h3>${persone.length === 1 ? "1 persona" : `${persone.length} persone`}</h3>${anche}
+    <ul class="esiti">${persone.map(p => `<li><button type="button" class="esito" data-azione="vai" data-id="${esc(p.id)}">${rigaPersona(p)}</button>
+      <button type="button" class="collegamento" data-azione="scheda" data-id="${esc(p.id)}">scheda</button></li>`).join("")}</ul>
+    <div class="azioni"><button type="button" data-azione="csv">Scarica i risultati in CSV</button></div>`;
+}
+
+function aggiornaEsitiAvanzata() {
+  const el = document.querySelector("#pannello-corpo .esiti-avanzata");
+  if (el && S.pannello?.tipo === "avanzata") el.innerHTML = htmlEsitiAvanzata();
+}
+
+function mostraAvanzata({ fuoco = null } = {}) {
+  if (!S.scena) return;
+  const A = S.avanzata, cx = contesto(S.scena);
+  const corpo = $("#pannello-corpo");
+  const scorrimento = S.pannello?.tipo === "avanzata" ? corpo.scrollTop : 0;
+  const coloriCeppi = new Map(S.scena.ceppi.map(c => [c.cognome, `--c:${c.riempimento};--b:${c.bordo}`]));
+  const persone = S.albero.persone.filter(p => !p.segnaposto).sort(perCognome);
+
+  const sceltaCampo = (c, i) => `<select data-campo="${i}" aria-label="Campo">${GRUPPI.map(g => `<optgroup label="${esc(g)}">${Object.entries(CAMPI)
+    .filter(([, x]) => x.gruppo === g).map(([k, x]) => `<option value="${k}"${k === c.campo ? " selected" : ""}>${esc(x.etichetta)}</option>`).join("")}</optgroup>`).join("")}</select>`;
+  const sceltaOp = (c, i) => {
+    const ops = operatori(c.campo);
+    return ops.length === 1 ? `<span class="op-fisso">${esc(ops[0][1])}</span>`
+      : `<select data-op="${i}" aria-label="Condizione">${ops.map(([id, t]) => `<option value="${id}"${id === c.op ? " selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
+  };
+  const valore = (c, i) => {
+    const campo = CAMPI[c.campo];
+    if (senzaValore(c.op) || campo.tipo === "elenco") return "";
+    if (campo.tipo === "testo") return `<input data-valore="${i}" value="${esc(c.valore)}" placeholder="testo" autocomplete="off" enterkeyhint="search">`;
+    if (campo.tipo === "persona") return `<select data-valore="${i}" aria-label="Persona"><option value="">scegli una persona…</option>${persone.map(p =>
+      `<option value="${esc(p.id)}"${p.id === c.valore ? " selected" : ""}>${esc(nomeCompleto(p))}${annoDi(p.nascita?.data) ? ` (${annoDi(p.nascita.data)})` : ""}</option>`).join("")}</select>`;
+    const segnaposto = campo.misura === "anno" ? "anno" : "numero";
+    const campoNumero = (attr, v, ph) => `<input ${attr}="${i}" value="${esc(v)}" placeholder="${ph}" inputmode="numeric" autocomplete="off" enterkeyhint="search">`;
+    return c.op === "tra" ? `${campoNumero("data-valore", c.valore, "da")}<span class="e">e</span>${campoNumero("data-valore2", c.valore2, "a")}`
+      : campoNumero("data-valore", c.valore, segnaposto);
+  };
+  const scelte = (c, i) => {
+    const campo = CAMPI[c.campo];
+    if (campo.tipo !== "elenco") return "";
+    return `<div class="chips">${campo.valori(cx).map(([v, t]) => {
+      const stile = c.campo === "famiglia" ? coloriCeppi.get(v) || "--c:#fff;--b:#666" : "";
+      return `<button type="button" class="chip filtro${c.valore.includes(v) ? " attiva" : ""}" data-azione="valore" data-i="${i}" data-v="${esc(v)}"${stile ? ` style="${stile}"` : ""}>${esc(t)}</button>`;
+    }).join("")}</div>`;
+  };
+  const connettivo = `<div class="connettivo">${A.modo === "almeno" ? "oppure" : "e"}</div>`;
+  const condizioni = A.condizioni.map((c, i) => `<div class="condizione${completa(c) ? "" : " incompleta"}" data-i="${i}">
+      <div class="riga-cond">${sceltaCampo(c, i)}<button type="button" class="togli" data-azione="togli" data-i="${i}" title="Togli la condizione" aria-label="Togli la condizione">✕</button></div>
+      <div class="riga-cond">${sceltaOp(c, i)}${valore(c, i)}</div>${scelte(c, i)}</div>`).join(connettivo);
+  const modo = A.condizioni.length > 1 ? `<div class="schede-scelta">
+      <label><input type="radio" name="modo" value="tutte"${A.modo !== "almeno" ? " checked" : ""}> Tutte le condizioni</label>
+      <label><input type="radio" name="modo" value="almeno"${A.modo === "almeno" ? " checked" : ""}> Almeno una</label></div>` : "";
+
+  apriPannello("Ricerca avanzata", `<div class="modulo avanzata">
+    <p class="spiegazione">Cerca su tutti i campi, anche su età, legami e valori dedotti, e combina più condizioni. Chi corrisponde si illumina, gli altri si attenuano.</p>
+    ${modo}<div class="condizioni">${condizioni}</div>
+    <div class="azioni"><button type="button" data-azione="aggiungi">+ Aggiungi una condizione</button><button type="button" data-azione="azzera">Azzera</button></div>
+    <section class="esiti-avanzata">${htmlEsitiAvanzata()}</section></div>`, (azione, el) => {
+    const i = Number(el.dataset.i);
+    if (azione === "aggiungi") {
+      A.condizioni.push(nuovaCondizione());
+      return mostraAvanzata({ fuoco: `[data-campo="${A.condizioni.length - 1}"]` });
+    }
+    if (azione === "togli") {
+      A.condizioni.splice(i, 1);
+      if (!A.condizioni.length) A.condizioni.push(nuovaCondizione());
+    }
+    if (azione === "azzera") S.avanzata = criteriVuoti();
+    if (azione === "valore") {
+      const c = A.condizioni[i], v = el.dataset.v;
+      if (CAMPI[c.campo].unico) c.valore = c.valore.includes(v) ? [] : [v];
+      else c.valore = c.valore.includes(v) ? c.valore.filter(x => x !== v) : [...c.valore, v];
+    }
+    if (azione === "vai") return seleziona(el.dataset.id, { centra: true, pannello: false });
+    if (azione === "scheda") return seleziona(el.dataset.id);
+    if (azione === "csv") {
+      const ids = risultatiAvanzati(S.avanzata);
+      if (ids?.size) scaricaTesto(aCSVPersone(S.albero, new Date(), ids), `ricerca-${oggiTesto()}.csv`, "text/csv");
+      return;
+    }
+    mostraAvanzata();
+    applicaAvanzata();
+  }, c => {
+    const radice = c.querySelector(".avanzata");
+    radice.addEventListener("change", e => {
+      const t = e.target;
+      if (t.name === "modo") { A.modo = t.value; mostraAvanzata(); return applicaAvanzata(); }
+      if (t.dataset.campo !== undefined) {
+        A.condizioni[Number(t.dataset.campo)] = nuovaCondizione(t.value);
+        mostraAvanzata({ fuoco: `[data-campo="${t.dataset.campo}"]` });
+        return applicaAvanzata();
+      }
+      if (t.dataset.op !== undefined) {
+        A.condizioni[Number(t.dataset.op)].op = t.value;
+        mostraAvanzata({ fuoco: `[data-op="${t.dataset.op}"]` });
+        return applicaAvanzata();
+      }
+      if (t.tagName === "SELECT" && t.dataset.valore !== undefined) {
+        A.condizioni[Number(t.dataset.valore)].valore = t.value;
+        mostraAvanzata();
+        applicaAvanzata();
+      }
+    });
+    // mentre si scrive si aggiornano bordo della condizione ed elenco; l'albero dopo una pausa
+    radice.addEventListener("input", e => {
+      const t = e.target;
+      if (t.tagName !== "INPUT" || t.type === "radio") return;
+      const k = t.dataset.valore ?? t.dataset.valore2;
+      if (k === undefined) return;
+      const cond = A.condizioni[Number(k)];
+      cond[t.dataset.valore !== undefined ? "valore" : "valore2"] = t.value;
+      t.closest(".condizione").classList.toggle("incompleta", !completa(cond));
+      aggiornaEsitiAvanzata();
+      applicaAvanzata(ATTESA_RICERCA);
+    });
+    radice.addEventListener("keydown", e => {
+      if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); applicaAvanzata(); }
+    });
+  }, { tipo: "avanzata" });
+  corpo.scrollTop = scorrimento;
+  if (fuoco) corpo.querySelector(fuoco)?.focus();
+}
+
+// Apre la ricerca avanzata; se nella casella c'è un testo, diventa la prima condizione.
+function apriAvanzata() {
+  if (S.pannello?.tipo === "avanzata") return chiudiPannello();
+  const campo = $("#cerca"), testo = campo.value.trim();
+  const unica = S.avanzata.condizioni.length === 1 && !completa(S.avanzata.condizioni[0]);
+  if (testo && unica) {
+    S.avanzata.condizioni[0] = { ...nuovaCondizione("qualsiasi"), valore: testo };
+    campo.value = "";
+    campo.dispatchEvent(new Event("input"));
+    applicaAvanzata();
+  }
+  mostraAvanzata({ fuoco: !testo && unica ? 'input[data-valore="0"]' : null });
+}
+
 function preparaRicerca() {
   const campo = $("#cerca"), lista = $("#risultati");
   let trovati = [], scelto = 0;
@@ -274,7 +468,6 @@ function preparaRicerca() {
   // mentre si scrive, i risultati si evidenziano e la vista li inquadra; chi è trovato solo
   // nelle note o nei luoghi resta nell'elenco ma sull'albero si illumina solo se nessun nome corrisponde
   let attesa = null;
-  const ATTESA_RICERCA = 750;      // ms dall'ultimo tasto prima di evidenziare e inquadrare
   const segna = tutti => {
     clearTimeout(attesa);
     const nelNome = tutti.filter(r => r.dove === "nome");
@@ -418,6 +611,7 @@ function mostraMenu() {
       <li>Trascina per spostarti, rotella o due dita per ingrandire; doppio clic per avvicinarti.</li>
       <li>Tocca una persona per la sua scheda; da lì puoi isolarne antenati, discendenti, famiglia o generazione.</li>
       <li>I colori sono le famiglie d'origine: toccali nel nastro in alto per filtrare.</li>
+      <li>Il pulsante a cursori nella casella di ricerca apre la ricerca avanzata: condizioni su tutti i campi, anche età e parentele, da combinare.</li>
       ${modifica ? "<li>«Disposizione» serve a sistemare il disegno: trascina le persone (con Alt anche i discendenti), tocca una linea per piegarla.</li><li>Ogni modifica finisce nello «Storico», da cui si può ripristinare.</li>" : ""}
       <li>† indica chi non è più in vita: lo si deduce dalla data di morte.</li>
     </ul></section>
@@ -556,6 +750,7 @@ async function avvia() {
           if (pan.persona) mostraPersona(ctx, pan.persona);
           else if (pan.unione) mostraUnione(ctx, pan.unione);
         }
+        aggiornaEsitiAvanzata();
         aggiornaAttrezzi();
       },
       suErrore: err => errore(err),
@@ -579,6 +774,7 @@ async function avvia() {
   preparaRicerca();
   preparaAttrezzi();
   $("#b-filtri").addEventListener("click", () => (S.pannello?.tipo === "filtri" ? chiudiPannello() : mostraFiltri()));
+  $("#b-avanzata").addEventListener("click", apriAvanzata);
   $("#b-esporta").addEventListener("click", () => (S.pannello?.tipo === "esporta" ? chiudiPannello() : mostraEsporta()));
   $("#b-menu").addEventListener("click", () => (S.pannello?.tipo === "menu" ? chiudiPannello() : mostraMenu()));
   $("#b-storico").addEventListener("click", () => mostraStorico(ctx));

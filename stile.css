@@ -57,13 +57,22 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .ricerca { position: relative; flex: 1; max-width: 420px; margin-left: auto; }
 .ricerca .lente { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 17px; height: 17px; opacity: .7; }
 #cerca {
-  width: 100%; height: 36px; padding: 0 12px 0 34px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, .22);
+  width: 100%; height: 36px; padding: 0 40px 0 34px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, .22);
   background: rgba(255, 255, 255, .14); color: #fff; outline: none; transition: background .15s;
 }
 #cerca::placeholder { color: rgba(255, 255, 255, .7); }
 #cerca:focus { background: #fff; color: var(--inchiostro); }
 #cerca:focus::placeholder { color: var(--tenue); }
 .ricerca:focus-within .lente { color: var(--tenue); opacity: 1; }
+#b-avanzata {
+  position: absolute; right: 3px; top: 50%; transform: translateY(-50%); width: 30px; height: 30px; border: 0; border-radius: 8px;
+  display: grid; place-items: center; background: transparent; color: #fff; opacity: .85; cursor: pointer;
+}
+#b-avanzata .icona { width: 18px; height: 18px; }
+#b-avanzata:hover { background: rgba(255, 255, 255, .18); opacity: 1; }
+#b-avanzata.attiva { background: rgba(255, 255, 255, .3); opacity: 1; }
+#cerca:focus ~ #b-avanzata { color: var(--tenue); }
+#cerca:focus ~ #b-avanzata:hover, #cerca:focus ~ #b-avanzata.attiva { background: var(--accento-chiaro); color: var(--accento); }
 #risultati {
   position: absolute; top: 42px; left: 0; right: 0; margin: 0; padding: 6px; list-style: none;
   background: #fff; color: var(--inchiostro); border-radius: 12px; box-shadow: var(--ombra); max-height: 60vh; overflow: auto;
@@ -91,10 +100,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--linea); overflow-x: auto; scrollbar-width: none;
 }
 #nastro::-webkit-scrollbar { display: none; }
+/* sullo schermo largo il pannello copre la destra del nastro: pillole e «mostra solo» si spostano a sinistra */
+@media (min-width: 761px) { .con-pannello #nastro { padding-right: 424px; } }
 .legenda-chips { display: flex; gap: 6px; flex: none; }
 .nastro-stato { display: flex; align-items: center; gap: 10px; flex: none; margin-left: auto; }
 .pillola { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 12px; border-radius: 99px; background: var(--barra-2); color: #fff; font-size: 13px; white-space: nowrap; }
 .pillola button { border: 0; background: rgba(255, 255, 255, .2); color: #fff; width: 22px; height: 22px; border-radius: 50%; cursor: pointer; font-size: 11px; }
+.pillola button.testo { width: auto; height: auto; padding: 0; border-radius: 0; background: none; font-size: 13px; text-decoration: underline; text-decoration-color: rgba(255, 255, 255, .45); text-underline-offset: 3px; }
 
 .chip {
   display: inline-flex; align-items: center; gap: 4px; padding: 4px 11px; border-radius: 9px; cursor: pointer;
@@ -293,6 +305,23 @@ select[size] { padding: 4px !important; }
 .avviso.via { opacity: 0; transform: translateY(8px); }
 
 .cornice-stampa { position: fixed; width: 0; height: 0; border: 0; visibility: hidden; }
+
+/* ------------------------------------------------ ricerca avanzata */
+.avanzata .condizioni { display: flex; flex-direction: column; gap: 6px; }
+.condizione { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #d8d4cb; border-radius: 12px; background: #fff; }
+.condizione.incompleta { border-style: dashed; background: #fbfaf7; }
+.riga-cond { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.modulo .riga-cond > select, .modulo .riga-cond > input { flex: 1 1 130px; min-width: 0; width: auto; }
+.riga-cond .e, .riga-cond .op-fisso { color: var(--tenue); font-size: 14px; padding: 0 4px; }
+.condizione .togli { flex: none; width: 28px; height: 28px; border: 0; border-radius: 50%; background: #f0eee9; cursor: pointer; font-size: 12px; }
+.condizione .togli:hover { background: #e6e2da; }
+.connettivo { align-self: center; font-size: 11.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--tenue); }
+.esiti { list-style: none; margin: 0; padding: 0; }
+.esiti li { display: flex; align-items: center; gap: 8px; }
+.esiti .esito { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 0; border-radius: 8px; background: none; text-align: left; cursor: pointer; font-size: 14px; }
+.esiti .esito:hover { background: var(--accento-chiaro); }
+.esiti .nome-esito { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.esiti .anni { margin-left: auto; color: var(--tenue); font-size: 13px; white-space: nowrap; }
 
 /* ------------------------------------------------ telefono */
 @media (max-width: 760px) {

@@ -60,12 +60,14 @@ export function descriviIsolamento(scena, iso) {
   }[iso.tipo];
 }
 
-// Unisce filtri e isolamento: chi è fuori viene attenuato o nascosto.
-export function visibilita(albero, scena, filtri, iso, soloVisibili, oggi = new Date()) {
+// Unisce filtri, isolamento e ricerca avanzata (l'insieme già calcolato, o null):
+// chi è fuori viene attenuato o nascosto.
+export function visibilita(albero, scena, filtri, iso, soloVisibili, oggi = new Date(), avanzata = null) {
   const a = corrispondenti(albero, scena, filtri, oggi);
   const b = insiemeIsolato(albero, scena, iso);
-  if (!a && !b) return { dentro: null, attenuati: new Set(), nascosti: new Set() };
-  const dentro = new Set(albero.persone.map(p => p.id).filter(id => (!a || a.has(id)) && (!b || b.has(id))));
+  const c = avanzata;
+  if (!a && !b && !c) return { dentro: null, attenuati: new Set(), nascosti: new Set() };
+  const dentro = new Set(albero.persone.map(p => p.id).filter(id => (!a || a.has(id)) && (!b || b.has(id)) && (!c || c.has(id))));
   const fuori = new Set(albero.persone.map(p => p.id).filter(id => !dentro.has(id)));
   return soloVisibili ? { dentro, attenuati: new Set(), nascosti: fuori } : { dentro, attenuati: fuori, nascosti: new Set() };
 }
