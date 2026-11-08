@@ -5,7 +5,7 @@
 // Solo browser; riceve il contesto dell'app da main.js.
 import { esc } from "./svg.js";
 import { nomeCompleto } from "./grafo.js";
-import { descriviProposta } from "./proposte.js";
+import { descriviProposta, riassunto } from "./proposte.js";
 import { suggerisci, modificaSuggerimento, applicaSuggerimento } from "./scheda.js";
 
 const MASSIMO = 2000;            // caratteri, come nelle regole di Firestore
@@ -25,10 +25,10 @@ function nomeNodo(ctx, n) {
   return u ? `Unione fra ${u.partner.map(p => nomeCompleto(ix.persona.get(p))).join(" e ")}` : null;
 }
 
-// chi modifica applica i suggerimenti; gli altri comandi come per ogni post-it
+// chi modifica accetta (applica) o rifiuta i suggerimenti; gli altri comandi come per ogni post-it
 function comandi(ctx, n) {
   const b = (azione, testo) => `<button type="button" class="collegamento" data-azione="${azione}" data-postit="${esc(n.id)}">${testo}</button>`;
-  if (ctx.modifica && n.proposta) return `<span class="comandi-postit">${b("postit-applica", "applica…")}${b("postit-togli", "togli")}</span>`;
+  if (ctx.modifica && n.proposta) return `<span class="comandi-postit">${b("postit-applica", "applica…")}${b("postit-rifiuta", "rifiuta…")}</span>`;
   return mio(ctx, n) ? `<span class="comandi-postit">${b("postit-modifica", "modifica")}${b("postit-togli", "togli")}</span>` : "";
 }
 
@@ -37,9 +37,11 @@ function biglietto(ctx, n) {
   let corpo = `<p>${testoNote(n.testo)}</p>`;
   if (n.proposta) {
     const { titolo, righe } = descriviProposta(ctx.indici(), n);
+    const risposta = !n.avvisa ? "" : ctx.modifica ? `${esc(n.autore)} riceverà la risposta per mail.` : mio(ctx, n) ? "Riceverai la risposta per mail." : "";
     corpo = `<div class="testa-suggerimento"><span class="marchio-suggerimento">Suggerimento</span> ${esc(titolo)}</div>
       ${righe.length ? `<ul class="proposta">${righe.map(r => `<li>${esc(r)}</li>`).join("")}</ul>` : ""}
-      ${n.testo ? `<p class="commento">${testoNote(n.testo)}</p>` : ""}`;
+      ${n.testo ? `<p class="commento">${testoNote(n.testo)}</p>` : ""}
+      ${risposta ? `<p class="avvisa">✉ ${risposta}</p>` : ""}`;
   }
   return `<div class="biglietto${n.proposta ? " suggerimento" : ""}">${corpo}
     <div class="firma"><span>${esc(n.autore)}, ${esc(quando(n.creato))}${altro}</span>${comandi(ctx, n)}</div></div>`;
@@ -49,7 +51,7 @@ function biglietto(ctx, n) {
 const INVITO = {
   persona: "Se sai la data o il luogo di nascita, un soprannome o altre notizie su questa persona, scrivile in un post-it. Se manca un parente o un dato è sbagliato, suggerisci la modifica: l'albero verrà aggiornato appena possibile.",
   unione: "Se sai quando e dove si sono sposati o altre notizie su questa coppia, scrivile in un post-it. Se manca un figlio o un dato è sbagliato, suggerisci la modifica: l'albero verrà aggiornato appena possibile.",
-  modifica: "Qui i familiari lasciano notizie, correzioni e suggerimenti. «Applica» apre la modifica già compilata: la controlli, la salvi e il suggerimento sparisce. Quando hai aggiornato l'albero da un post-it, toglilo.",
+  modifica: "Qui i familiari lasciano notizie, correzioni e suggerimenti. «Applica» apre la modifica già compilata: la controlli, la salvi e il suggerimento sparisce. Chi ha lasciato l'email riceve la risposta, sia che accetti sia che rifiuti. Quando hai aggiornato l'albero da un post-it, toglilo.",
 };
 
 // Sezione per la scheda di una persona o di un'unione (tipo: "persona" | "unione").
@@ -82,6 +84,22 @@ function scrivi(ctx, titolo, iniziale = "") {
   });
 }
 
+// Il rifiuto di un suggerimento: il motivo (anche vuoto) se si conferma, null se si annulla.
+function rifiuto(ctx, n) {
+  return ctx.dialogo(`<form method="dialog" class="modulo"><h2>Rifiuti il suggerimento di ${esc(n.autore)}?</h2>
+    <p class="spiegazione">Sparisce per tutti e non si può recuperare.${n.avvisa ? ` ${esc(n.autore)} riceverà una mail con la risposta.` : ""}</p>
+    ${n.avvisa ? `<label>Vuoi dire perché? <span class="facoltativo">facoltativo, va nella mail</span>
+      <textarea name="motivo" rows="3" maxlength="2000" placeholder="Per esempio: secondo lo stato di famiglia la data è un'altra"></textarea></label>` : ""}
+    <div class="azioni"><button value="ok" class="pericolo">Rifiuta</button><button value="no" formnovalidate>Annulla</button></div></form>`,
+  (d, chiudi) => {
+    const f = d.querySelector("form");
+    f.addEventListener("submit", e => {
+      e.preventDefault();
+      chiudi(e.submitter?.value === "ok" ? (f.elements.motivo?.value.trim() || "") : null);
+    });
+  });
+}
+
 // Esegue le azioni «postit-…» di schede e pannello. nodo: {nodo, tipo} per l'aggiunta.
 export async function gestisciPostit(ctx, azione, el, nodo = null) {
   try {
@@ -96,16 +114,22 @@ export async function gestisciPostit(ctx, azione, el, nodo = null) {
     const n = ctx.postit().find(x => x.id === el?.dataset.postit);
     if (!n) return;
     if (azione === "postit-applica" && n.proposta) return await applicaSuggerimento(ctx, n);
+    if (azione === "postit-rifiuta" && n.proposta) {
+      const motivo = await rifiuto(ctx, n);
+      if (motivo === null) return;
+      await ctx.attendiPoco(ctx.dati().rifiutaSuggerimento({ ...n, riassunto: riassunto(ctx.indici(), n) }, motivo));
+      return ctx.avviso(n.avvisa ? `Suggerimento rifiutato: ${n.autore} riceverà la risposta per mail.` : "Suggerimento rifiutato.");
+    }
     if (azione === "postit-modifica" && n.proposta) return await modificaSuggerimento(ctx, n);
     if (azione === "postit-modifica") {
       const testo = await scrivi(ctx, "Modifica il post-it", n.testo);
       if (!testo || testo === n.testo || !await ctx.nomeAutore()) return;
-      await ctx.attendiPoco(ctx.dati().modificaPostit(n.id, testo));
+      await ctx.attendiPoco(ctx.dati().modificaPostit(n, { testo }));
     }
     if (azione === "postit-togli") {
       const cosa = n.proposta ? "questo suggerimento" : "questo post-it";
       if (!await ctx.conferma(`Tolgo ${cosa}? Sparisce per tutti e non si può recuperare.`, "Togli", true)) return;
-      await ctx.attendiPoco(ctx.dati().togliPostit(n.id));
+      await ctx.attendiPoco(ctx.dati().togliPostit(n));
     }
   } catch (err) { ctx.errore(err); }
 }

@@ -759,6 +759,9 @@ const ctx = {
   mioUid: () => dati?.mioUid(),
   apriNodo,
   nomeAutore: async () => memoria.leggi("nome") || chiediNome(),
+  // l'email per la risposta ai suggerimenti: resta su questo dispositivo, come il nome
+  email: () => memoria.leggi("email") || "",
+  ricordaEmail: v => memoria.scrivi("email", v),
   async attendiPoco(promessa) {
     promessa.catch(errore);
     await Promise.race([promessa, new Promise(ok => setTimeout(ok, 600))]);

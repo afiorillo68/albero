@@ -60,13 +60,14 @@ function personaInParole(ix, pr) {
 
 const coppiaInParole = (ix, u) => u.partner.map(p => nomeCompleto(ix.persona.get(p))).join(" e ");
 
-// {titolo, righe}: righe di testo semplice, da mettere in un elenco.
-export function descriviProposta(ix, n) {
+// {titolo, righe}: righe di testo semplice, da mettere in un elenco. confronto: accanto ai
+// dati proposti, quelli di adesso (non nella risposta a chi ha suggerito, che li ha già visti).
+export function descriviProposta(ix, n, { confronto = true } = {}) {
   const pr = n.proposta || {};
   if (pr.azione === "dati") {
     const scheda = n.tipo === "unione" ? ix.unione.get(n.nodo) : ix.persona.get(n.nodo);
     const righe = Object.entries(pr.campi || {}).map(([c, v]) => {
-      const ora = scheda ? (uguali(c, scheda[c], v) ? " (è già così)" : ` (ora: ${valoreLeggibile(c, scheda[c])})`) : "";
+      const ora = !scheda || !confronto ? "" : uguali(c, scheda[c], v) ? " (è già così)" : ` (ora: ${valoreLeggibile(c, scheda[c])})`;
       return `${ETICHETTE[c] || c}: ${valoreLeggibile(c, v)}${ora}`;
     });
     return { titolo: n.tipo === "unione" ? "Correzione dei dati della coppia" : "Correzione dei dati", righe };
@@ -91,3 +92,17 @@ export function descriviProposta(ix, n) {
   }
   return { titolo: "Suggerimento", righe: [] };
 }
+
+export function doveProposta(ix, n) {
+  if (n.tipo === "unione") {
+    const u = ix.unione.get(n.nodo);
+    return u ? `sulla coppia ${coppiaInParole(ix, u)}` : "su un'unione che non è più nell'albero";
+  }
+  const p = ix.persona.get(n.nodo);
+  return p ? `su ${nomeCompleto(p)}` : "su una persona che non è più nell'albero";
+}
+
+// Quello che resta di un suggerimento accettato o rifiutato, per la mail a chi l'ha scritto.
+export const riassunto = (ix, n) => ({ autore: n.autore, nodo: n.nodo, dove: doveProposta(ix, n), ...descriviProposta(ix, n, { confronto: false }) });
+
+export const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;

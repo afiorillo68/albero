@@ -3,7 +3,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js";
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, memoryLocalCache,
-  doc, collection, onSnapshot, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp,
+  doc, collection, onSnapshot, getDoc, getDocs, setDoc, writeBatch, serverTimestamp,
   FieldPath, deleteField, query, orderBy, limit, startAfter, where,
 } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js";
@@ -90,6 +90,11 @@ export async function apri(configurazione, chiave, { suCambio, suErrore, suStato
 
   const modifiche = collection(db, "alberi", kL, "modifiche");
   const postit = collection(db, "alberi", kL, "postit");
+  // l'email di chi vuole la risposta e l'esito per la risposta: li legge solo lo script di notifica
+  const recapiti = collection(db, "alberi", kL, "recapiti");
+  const esiti = collection(db, "alberi", kL, "esiti");
+  const esito = (n, cosa, chi, motivo = "") => [doc(esiti, n.id),
+    { esito: cosa, chi: chi.slice(0, 60), motivo, quando: serverTimestamp(), riassunto: n.riassunto }];
   const attuale = (raccolta, id) => {
     const v = stato[raccolta].get(id);
     return v ? senzaId(v) : null;
@@ -98,7 +103,8 @@ export async function apri(configurazione, chiave, { suCambio, suErrore, suStato
   // operazioni: [{raccolta: "persone"|"unioni", id, dopo: {...} | null}]
   // disposizione: [{sezione: "nodi"|"archi", id, dopo: valore | null}]
   // meta: {campo: valore}
-  // applicati: [id] dei suggerimenti applicati, che spariscono insieme alla modifica
+  // applicati: [{id, avvisa, riassunto}] dei suggerimenti applicati, che spariscono insieme
+  // alla modifica; se l'autore vuole la risposta, nello stesso lotto nasce l'esito
   async function salva({ operazioni = [], disposizione = [], meta = null, applicati = [], descrizione }) {
     if (!modifica) throw new Error("Questo link è in sola lettura.");
     const chi = nome() || "qualcuno";
@@ -128,7 +134,10 @@ export async function apri(configurazione, chiave, { suCambio, suErrore, suStato
       batch.update(radice, meta);
       voce({ tipo: "meta", prima, dopo: meta });
     }
-    for (const id of applicati) batch.delete(doc(postit, id));
+    for (const n of applicati) {
+      batch.delete(doc(postit, n.id));
+      if (n.avvisa) batch.set(...esito(n, "accettato", chi));
+    }
     await batch.commit();
   }
 
@@ -165,20 +174,48 @@ export async function apri(configurazione, chiave, { suCambio, suErrore, suStato
   }
   const firma = () => (nome() || "qualcuno").slice(0, 60);
 
-  async function aggiungiPostit({ nodo, tipo, testo, proposta }) {
+  // email: solo per i suggerimenti, per avere la risposta quando vengono accettati o rifiutati
+  async function aggiungiPostit({ nodo, tipo, testo, proposta, email = "" }) {
     const io = await identita();
-    await addDoc(postit, { nodo, tipo, testo, proposta, autore: firma(), uid: io, creato: serverTimestamp(), aggiornato: serverTimestamp() });
+    const rif = doc(postit);
+    const batch = writeBatch(db);
+    batch.set(rif, { nodo, tipo, testo, proposta, ...(proposta ? { avvisa: !!email } : {}),
+      autore: firma(), uid: io, creato: serverTimestamp(), aggiornato: serverTimestamp() });
+    if (proposta && email) batch.set(doc(recapiti, rif.id), { email, uid: io });
+    await batch.commit();
   }
 
-  async function modificaPostit(id, testo, proposta) {
-    await identita();
-    await updateDoc(doc(postit, id), { testo, proposta, modificatoDa: firma(), aggiornato: serverTimestamp() });
+  // n: il post-it com'è adesso; email undefined lascia il recapito com'è
+  async function modificaPostit(n, { testo, proposta, email }) {
+    const io = await identita();
+    const batch = writeBatch(db);
+    const campi = { testo, proposta, modificatoDa: firma(), aggiornato: serverTimestamp() };
+    if (proposta && email !== undefined) {
+      campi.avvisa = !!email;
+      if (email) batch.set(doc(recapiti, n.id), { email, uid: io });
+      else if (n.avvisa) batch.delete(doc(recapiti, n.id));
+    }
+    batch.update(doc(postit, n.id), campi);
+    await batch.commit();
   }
 
-  async function togliPostit(id) {
-    await identita();
-    await deleteDoc(doc(postit, id));
+  // chi l'ha scritto lo ritira, con il suo recapito; chi modifica toglie i post-it semplici
+  async function togliPostit(n) {
+    const io = await identita();
+    const batch = writeBatch(db);
+    batch.delete(doc(postit, n.id));
+    if (n.avvisa && n.uid === io) batch.delete(doc(recapiti, n.id));
+    await batch.commit();
   }
 
-  return { modifica, mioUid: () => uid, salva, storico, ripristina, attuale, aggiungiPostit, modificaPostit, togliPostit };
+  // n: il suggerimento con il suo riassunto (proposte.js), che resta per la risposta
+  async function rifiutaSuggerimento(n, motivo = "") {
+    if (!modifica) throw new Error("Questo link è in sola lettura.");
+    const batch = writeBatch(db);
+    batch.delete(doc(postit, n.id));
+    if (n.avvisa) batch.set(...esito(n, "rifiutato", firma(), motivo));
+    await batch.commit();
+  }
+
+  return { modifica, mioUid: () => uid, salva, storico, ripristina, attuale, aggiungiPostit, modificaPostit, togliPostit, rifiutaSuggerimento };
 }

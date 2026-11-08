@@ -10,7 +10,7 @@ import { normalizzaData, formattaData, statoInVita, TESTO_IN_VITA, eta, annoDi, 
 import { collocaNuova } from "./geometria.js";
 import { idArcoPartner, idArcoFiglio, NEUTRO } from "./scena.js";
 import { sezionePostit, gestisciPostit, azioneDiPostit } from "./postit.js";
-import { CAMPI_PERSONA, CAMPI_UNIONE, MISURE, differenze } from "./proposte.js";
+import { CAMPI_PERSONA, CAMPI_UNIONE, MISURE, EMAIL, differenze, riassunto } from "./proposte.js";
 
 // ------------------------------------------------------------ utilità
 
@@ -47,7 +47,7 @@ function chip(ctx, id) {
 const testoNote = s => esc(s).replace(/\n/g, "<br>");
 
 const suSuggerimento = (descrizione, n) => (n ? `${descrizione}, su suggerimento di ${n.autore}` : descrizione);
-const applicati = n => (n ? [n.id] : []);
+const applicati = (ctx, n) => (n ? [{ id: n.id, avvisa: !!n.avvisa, riassunto: riassunto(ctx.indici(), n) }] : []);
 const verbo = opz => (opz.suggerisci ? "Suggerisci" : "Aggiungi");
 const pulsante = (opz, normale) => (opz.suggerisci ? "Invia il suggerimento" : normale);
 const personaScelta = s => (s.id ? { persona: s.id } : { nuova: s.nuova });
@@ -59,8 +59,24 @@ function richiamo(n) {
     <p class="spiegazione">Il modulo è già compilato: controlla, correggi se serve e salva. Il suggerimento sparisce con il salvataggio.</p></div>`;
 }
 
-const campoCommento = (valore = "") => `<label>Come lo sai? <span class="facoltativo">facoltativo</span>
-  <textarea name="commento" rows="3" maxlength="2000" placeholder="Per esempio: me l'ha detto la zia; c'è scritto sul certificato">${esc(valore)}</textarea></label>`;
+// In fondo ai moduli di chi suggerisce: da dove viene la notizia e, se vuole la risposta,
+// l'email (la propone quella usata l'ultima volta su questo dispositivo).
+const campiSuggerimento = (commento = "", email = "") => `<label>Come lo sai? <span class="facoltativo">facoltativo</span>
+  <textarea name="commento" rows="3" maxlength="2000" placeholder="Per esempio: me l'ha detto la zia; c'è scritto sul certificato">${esc(commento)}</textarea></label>
+  <label>La tua email <span class="facoltativo">facoltativa</span>
+  <input type="email" name="email" value="${esc(email)}" autocomplete="email" maxlength="200" placeholder="nome@esempio.it"></label>
+  <p class="spiegazione">Se la scrivi, ti arriva una mail quando il suggerimento viene accettato o rifiutato. La legge solo chi cura l'albero.</p>`;
+
+// {commento, email} dal modulo, oppure null se l'email è scritta male
+function invio(f, segnala) {
+  const commento = f.elements.commento?.value.trim() || "";
+  const email = f.elements.email?.value.trim() || "";
+  if (email && !EMAIL.test(email)) {
+    segnala("L'email non sembra scritta bene: controllala, oppure lasciala vuota.");
+    return null;
+  }
+  return { commento, email };
+}
 
 // ------------------------------------------------------------ scheda della persona
 
@@ -142,7 +158,7 @@ export function mostraPersona(ctx, id) {
 // ------------------------------------------------------------ modulo della persona
 
 // opz.iniziale: campi che coprono quelli della scheda (proposta da modificare o da applicare)
-export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null, iniziale = null, suggerisci = null, commento = "", applica = null } = {}) {
+export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null, iniziale = null, suggerisci = null, commento = "", email = "", applica = null } = {}) {
   const attuale = nuova || ctx.indici().persona.get(id);
   if (!attuale) return ctx.avviso("Questa persona non è più nell'albero.");
   const p = iniziale ? { ...attuale, ...iniziale } : attuale;
@@ -182,7 +198,7 @@ export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null,
         <label class="spunta"><input type="checkbox" name="deceduto"${p.deceduto ? " checked" : ""}> Non è più in vita, ma la data non si sa</label>
       </fieldset>
       <label>Note <textarea name="note" rows="6" placeholder="Ricordi, mestiere, dove ha vissuto, da chi viene l'informazione…"${suggerisci ? lungo(MISURE.note) : ""}>${esc(p.note)}</textarea></label>
-      ${suggerisci ? campoCommento(commento) : ""}
+      ${suggerisci ? campiSuggerimento(commento, email) : ""}
       <p class="errore" hidden></p>
       <div class="azioni">
         <button type="submit" class="primario">${pulsante({ suggerisci }, "Salva")}</button>
@@ -215,8 +231,10 @@ export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null,
       if (suggerisci) {
         const campi = differenze(attuale, dopo, CAMPI_PERSONA);
         if (!Object.keys(campi).length) return segnala("Non hai cambiato nulla: correggi o completa almeno un campo.");
+        const extra = invio(f, segnala);
+        if (!extra) return;
         try {
-          if (await suggerisci({ azione: "dati", campi }, v("commento").trim())) mostraPersona(ctx, id);
+          if (await suggerisci({ azione: "dati", campi }, extra)) mostraPersona(ctx, id);
         } catch (err) { ctx.errore(err); }
         return;
       }
@@ -229,7 +247,7 @@ export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null,
       }
       try {
         if (dopoSalvataggio) await dopoSalvataggio(dopo);
-        else await ctx.salva({ operazioni: [{ raccolta: "persone", id, dopo }], applicati: applicati(applica),
+        else await ctx.salva({ operazioni: [{ raccolta: "persone", id, dopo }], applicati: applicati(ctx, applica),
           descrizione: suSuggerimento(`Modificata la scheda di ${nomeCompleto(dopo)}`, applica) });
         mostraPersona(ctx, dopo.id);
       } catch (err) { ctx.errore(err); }
@@ -242,7 +260,7 @@ export function modificaPersona(ctx, id, { nuova = null, dopoSalvataggio = null,
 // iniziale: {id} oppure {nuova: {nome, cognome, nascita}}; suggerimento: chiede il commento;
 // conNascita: chiede anche la nascita di chi è nuovo (in chi suggerisce e in chi applica).
 function scegliPersona(ctx, { titolo, spiegazione = "", ammessa = () => true, conCoppia = null, sopra = "",
-  iniziale = null, commento = "", suggerimento = false, conNascita = false }) {
+  iniziale = null, commento = "", email = "", suggerimento = false, conNascita = false }) {
   const n0 = iniziale?.nuova || {};
   return ctx.dialogo(`
     <form method="dialog" class="modulo scelta">
@@ -266,7 +284,7 @@ function scegliPersona(ctx, { titolo, spiegazione = "", ammessa = () => true, co
         <input name="cerca" type="search" placeholder="Cerca per nome o cognome" autocomplete="off">
         <select name="scelta" size="7"></select>
       </div>
-      ${suggerimento ? campoCommento(commento) : ""}
+      ${suggerimento ? campiSuggerimento(commento, email) : ""}
       <p class="errore" hidden></p>
       <div class="azioni">
         <button value="ok" class="primario">${suggerimento ? "Invia il suggerimento" : "Aggiungi"}</button>
@@ -294,7 +312,8 @@ function scegliPersona(ctx, { titolo, spiegazione = "", ammessa = () => true, co
       e.preventDefault();
       if (e.submitter?.value !== "ok") return chiudi(null);
       const coppia = f.elements.coppia?.value;
-      const commento = f.elements.commento?.value.trim() || "";
+      const extra = invio(f, segnala);
+      if (!extra) return;
       if (f.elements.modo.value === "nuova") {
         const nuova = { nome: f.elements.nome.value.trim(), cognome: f.elements.cognome.value.trim() };
         if (suggerimento && !nuova.nome && !nuova.cognome) return segnala("Scrivi almeno il nome o il cognome.");
@@ -303,11 +322,11 @@ function scegliPersona(ctx, { titolo, spiegazione = "", ammessa = () => true, co
           if (!data.valida) return segnala("La data di nascita non è valida: scrivila come 05/05/1968, 05/1968 oppure 1968.");
           if (data.data || luogo) nuova.nascita = { data: data.data, circa: false, luogo };
         }
-        return chiudi({ nuova, coppia, commento });
+        return chiudi({ nuova, coppia, ...extra });
       }
       const id = f.elements.scelta.value;
       if (!id) return segnala("Scegli una persona dall'elenco.");
-      chiudi({ id, coppia, commento });
+      chiudi({ id, coppia, ...extra });
     });
     f.elements.nome.focus();
     // proposta da modificare o da applicare: la persona già nell'albero si ritrova cercandola
@@ -332,11 +351,11 @@ async function aggiungiPartner(ctx, id, opz = {}) {
   const scelta = await scegliPersona(ctx, {
     titolo: `${verbo(opz)} un partner di ${nomeCompleto(p)}`, ammessa: q => q.id !== id,
     spiegazione: opz.suggerisci ? "Marito, moglie, compagno o compagna. Se è già nell'albero, sceglilo dall'elenco." : "",
-    sopra: richiamo(opz.applica), iniziale: opz.iniziale, commento: opz.commento,
+    sopra: richiamo(opz.applica), iniziale: opz.iniziale, commento: opz.commento, email: opz.email,
     suggerimento: !!opz.suggerisci, conNascita: !!(opz.suggerisci || opz.applica),
   });
   if (!scelta) return;
-  if (opz.suggerisci) return opz.suggerisci({ azione: "partner", ...personaScelta(scelta) }, scelta.commento);
+  if (opz.suggerisci) return opz.suggerisci({ azione: "partner", ...personaScelta(scelta) }, scelta);
   const albero = ctx.albero();
   const operazioni = [], disposizione = [];
   let altro = scelta.id;
@@ -349,7 +368,7 @@ async function aggiungiPartner(ctx, id, opz = {}) {
   const u = nuovaUnione(albero, [id, altro]);
   operazioni.push({ raccolta: "unioni", id: u.id, dopo: u });
   const q = ctx.indici().persona.get(altro) || { nome: scelta.nuova?.nome, cognome: scelta.nuova?.cognome };
-  await ctx.salva({ operazioni, disposizione, applicati: applicati(opz.applica),
+  await ctx.salva({ operazioni, disposizione, applicati: applicati(ctx, opz.applica),
     descrizione: suSuggerimento(`Aggiunta la coppia ${nomeCompleto(p)} e ${nomeCompleto(q)}`, opz.applica) });
   ctx.seleziona(altro, { centra: true });
 }
@@ -368,13 +387,13 @@ async function aggiungiFiglio(ctx, id, unioneScelta = null, opz = {}) {
     spiegazione: unioni.length ? "" : opz.suggerisci ? "Se sai chi è l'altro genitore, scrivilo in «Come lo sai?»."
       : "L'altro genitore comparirà come «non noto»: potrai completarlo dopo.",
     ammessa: q => q.id !== id && !ix.genitoriDi.has(q.id), conCoppia: coppia,
-    sopra: richiamo(opz.applica), iniziale: opz.iniziale, commento: opz.commento,
+    sopra: richiamo(opz.applica), iniziale: opz.iniziale, commento: opz.commento, email: opz.email,
     suggerimento: !!opz.suggerisci, conNascita: !!(opz.suggerisci || opz.applica),
   });
   if (!scelta) return;
   if (opz.suggerisci) {
     const unione = unioneScelta || scelta.coppia || unioni[0]?.id;
-    return opz.suggerisci({ azione: opz.azione || "figlio", ...(unione ? { unione } : {}), ...personaScelta(scelta) }, scelta.commento);
+    return opz.suggerisci({ azione: opz.azione || "figlio", ...(unione ? { unione } : {}), ...personaScelta(scelta) }, scelta);
   }
   const albero = ctx.albero();
   const operazioni = [], disposizione = [];
@@ -398,7 +417,7 @@ async function aggiungiFiglio(ctx, id, unioneScelta = null, opz = {}) {
     disposizione.push({ sezione: "nodi", id: n.id, dopo: tondo(collocaNuova(posizioni, unioniProva, { tipo: "figlio", unione: u.id })) });
   }
   operazioni.push({ raccolta: "unioni", id: u.id, dopo: { ...u, figli: [...u.figli, figlio] } });
-  await ctx.salva({ operazioni, disposizione, applicati: applicati(opz.applica),
+  await ctx.salva({ operazioni, disposizione, applicati: applicati(ctx, opz.applica),
     descrizione: suSuggerimento(`Aggiunto un figlio di ${nomeCompleto(p)}`, opz.applica) });
   ctx.seleziona(figlio, { centra: true });
 }
@@ -425,7 +444,7 @@ async function aggiungiGenitori(ctx, id, opz = {}) {
       <div data-se="coppia" hidden>
         <select name="coppia" size="7">${coppie.map(u => `<option value="${esc(u.id)}">${esc(u.partner.map(q => nomeCompleto(ix.persona.get(q))).join(" e "))}</option>`).join("")}</select>
       </div>
-      ${opz.suggerisci ? campoCommento(opz.commento) : ""}
+      ${opz.suggerisci ? campiSuggerimento(opz.commento, opz.email) : ""}
       <p class="errore" hidden></p>
       <div class="azioni"><button value="ok" class="primario">${pulsante(opz, "Aggiungi")}</button><button value="annulla" formnovalidate>Annulla</button></div>
     </form>`, (d, chiudi) => {
@@ -440,13 +459,14 @@ async function aggiungiGenitori(ctx, id, opz = {}) {
     f.addEventListener("submit", e => {
       e.preventDefault();
       if (e.submitter?.value !== "ok") return chiudi(null);
-      const commento = f.elements.commento?.value.trim() || "";
+      const extra = invio(f, segnala);
+      if (!extra) return;
       if (f.elements.modo.value === "coppia") {
-        return f.elements.coppia.value ? chiudi({ coppia: f.elements.coppia.value, commento }) : segnala("Scegli una coppia dall'elenco.");
+        return f.elements.coppia.value ? chiudi({ coppia: f.elements.coppia.value, ...extra }) : segnala("Scegli una coppia dall'elenco.");
       }
       const nuovi = [1, 2].map(i => ({ nome: f.elements[`n${i}`].value.trim(), cognome: f.elements[`c${i}`].value.trim() }));
       if (opz.suggerisci && !nuovi.some(n => n.nome || n.cognome)) return segnala("Scrivi almeno un nome o un cognome.");
-      chiudi({ nuovi, commento });
+      chiudi({ nuovi, ...extra });
     });
     const coppia = opz.iniziale?.coppia;
     if (coppia && ix.unione.has(coppia)) {
@@ -457,13 +477,13 @@ async function aggiungiGenitori(ctx, id, opz = {}) {
   });
   if (!scelta) return;
   if (opz.suggerisci) {
-    return opz.suggerisci({ azione: "genitori", ...(scelta.coppia ? { coppia: scelta.coppia } : { nuovi: scelta.nuovi }) }, scelta.commento);
+    return opz.suggerisci({ azione: "genitori", ...(scelta.coppia ? { coppia: scelta.coppia } : { nuovi: scelta.nuovi }) }, scelta);
   }
   const albero = ctx.albero();
   if (scelta.coppia) {
     const u = ix.unione.get(scelta.coppia);
     await ctx.salva({ operazioni: [{ raccolta: "unioni", id: u.id, dopo: { ...u, figli: [...u.figli, id] } }],
-      applicati: applicati(opz.applica), descrizione: suSuggerimento(`Collegati i genitori di ${nomeCompleto(p)}`, opz.applica) });
+      applicati: applicati(ctx, opz.applica), descrizione: suSuggerimento(`Collegati i genitori di ${nomeCompleto(p)}`, opz.applica) });
     return mostraPersona(ctx, id);
   }
   const operazioni = [], disposizione = [];
@@ -480,7 +500,7 @@ async function aggiungiGenitori(ctx, id, opz = {}) {
   });
   const u = nuovaUnione(albero, nuovi.map(n => n.id), [id]);
   operazioni.push({ raccolta: "unioni", id: u.id, dopo: u });
-  await ctx.salva({ operazioni, disposizione, applicati: applicati(opz.applica),
+  await ctx.salva({ operazioni, disposizione, applicati: applicati(ctx, opz.applica),
     descrizione: suSuggerimento(`Aggiunti i genitori di ${nomeCompleto(p)}`, opz.applica) });
   mostraPersona(ctx, id);
 }
@@ -577,7 +597,7 @@ export function mostraUnione(ctx, uid) {
   }, null, { unione: uid });
 }
 
-function modificaUnione(ctx, uid, { iniziale = null, suggerisci = null, commento = "", applica = null } = {}) {
+function modificaUnione(ctx, uid, { iniziale = null, suggerisci = null, commento = "", email = "", applica = null } = {}) {
   const ix = ctx.indici();
   const attuale = ix.unione.get(uid);
   if (!attuale) return ctx.avviso("Questa unione non è più nell'albero.");
@@ -593,7 +613,7 @@ function modificaUnione(ctx, uid, { iniziale = null, suggerisci = null, commento
       </select></label>
       <label>Note <textarea name="note" rows="5"${suggerisci ? ` maxlength="${MISURE.note}" placeholder="Per esempio: si sono sposati a Napoli nel 1958"` : ""}>${esc(u.note)}</textarea></label>
       <label>Fonte <input name="fonte" value="${esc(u.fonte)}"${suggerisci ? ` maxlength="${MISURE.fonte}"` : ""}></label>
-      ${suggerisci ? campoCommento(commento) : ""}
+      ${suggerisci ? campiSuggerimento(commento, email) : ""}
       <p class="errore" hidden></p>
       <div class="azioni"><button type="submit" class="primario">${pulsante({ suggerisci }, "Salva")}</button><button type="button" data-azione="annulla">Annulla</button></div>
     </form>`;
@@ -605,17 +625,16 @@ function modificaUnione(ctx, uid, { iniziale = null, suggerisci = null, commento
       const dopo = { ...u, stato: f.elements.stato.value, note: f.elements.note.value.trim(), fonte: f.elements.fonte.value.trim() };
       try {
         if (suggerisci) {
+          const errore = f.querySelector(".errore");
+          const segnala = testo => { errore.textContent = testo; errore.hidden = false; };
           const campi = differenze(attuale, dopo, CAMPI_UNIONE);
-          if (!Object.keys(campi).length) {
-            const errore = f.querySelector(".errore");
-            errore.textContent = "Non hai cambiato nulla: correggi o completa almeno un campo.";
-            errore.hidden = false;
-            return;
-          }
-          if (await suggerisci({ azione: "dati", campi }, f.elements.commento.value.trim())) mostraUnione(ctx, uid);
+          if (!Object.keys(campi).length) return segnala("Non hai cambiato nulla: correggi o completa almeno un campo.");
+          const extra = invio(f, segnala);
+          if (!extra) return;
+          if (await suggerisci({ azione: "dati", campi }, extra)) mostraUnione(ctx, uid);
           return;
         }
-        await ctx.salva({ operazioni: [{ raccolta: "unioni", id: uid, dopo }], applicati: applicati(applica),
+        await ctx.salva({ operazioni: [{ raccolta: "unioni", id: uid, dopo }], applicati: applicati(ctx, applica),
           descrizione: suSuggerimento(`Modificata l'unione fra ${coppia}`, applica) });
         mostraUnione(ctx, uid);
       } catch (err) { ctx.errore(err); }
@@ -654,15 +673,18 @@ export async function suggerisci(ctx, nodo, tipo) {
     e.preventDefault();
     chiudi(e.submitter?.value === "no" ? null : e.submitter?.value);
   }));
-  if (azione) apriModulo(ctx, nodo, tipo, azione, { suggerisci: inviaSuggerimento(ctx, nodo, tipo) });
+  if (azione) apriModulo(ctx, nodo, tipo, azione, { suggerisci: inviaSuggerimento(ctx, nodo, tipo), email: ctx.email() });
 }
 
 // Manda la proposta (nuova, o al posto di quella del post-it n); true se è partita.
-const inviaSuggerimento = (ctx, nodo, tipo, n = null) => async (proposta, commento) => {
+// L'email resta su questo dispositivo e si ripropone al suggerimento successivo.
+const inviaSuggerimento = (ctx, nodo, tipo, n = null) => async (proposta, { commento = "", email = "" } = {}) => {
   if (!await ctx.nomeAutore()) return false;
-  if (n) await ctx.attendiPoco(ctx.dati().modificaPostit(n.id, commento, proposta));
-  else await ctx.attendiPoco(ctx.dati().aggiungiPostit({ nodo, tipo, testo: commento, proposta }));
-  ctx.avviso(n ? "Suggerimento aggiornato." : "Suggerimento inviato: grazie! Chi cura l'albero lo vedrà fra i post-it.");
+  if (email) ctx.ricordaEmail(email);
+  if (n) await ctx.attendiPoco(ctx.dati().modificaPostit(n, { testo: commento, proposta, email }));
+  else await ctx.attendiPoco(ctx.dati().aggiungiPostit({ nodo, tipo, testo: commento, proposta, email }));
+  const risposta = email ? ` Ti scriveremo a ${email} quando sarà accettato o rifiutato.` : "";
+  ctx.avviso((n ? "Suggerimento aggiornato." : "Suggerimento inviato: grazie! Chi cura l'albero lo vedrà fra i post-it.") + risposta);
   return true;
 };
 
@@ -706,8 +728,8 @@ function daProposta(n) {
 }
 
 // Chi ha scritto il suggerimento lo riapre per cambiarlo; chi modifica lo applica.
-export const modificaSuggerimento = (ctx, n) =>
-  apriModulo(ctx, n.nodo, n.tipo, n.proposta.azione, { ...daProposta(n), suggerisci: inviaSuggerimento(ctx, n.nodo, n.tipo, n) });
+export const modificaSuggerimento = (ctx, n) => apriModulo(ctx, n.nodo, n.tipo, n.proposta.azione,
+  { ...daProposta(n), email: n.avvisa ? ctx.email() : "", suggerisci: inviaSuggerimento(ctx, n.nodo, n.tipo, n) });
 export const applicaSuggerimento = (ctx, n) =>
   apriModulo(ctx, n.nodo, n.tipo, n.proposta.azione, { ...daProposta(n), applica: n });
 
