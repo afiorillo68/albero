@@ -524,6 +524,7 @@ async function avvia() {
     },
     doppioClic: b => disposizione.doppioClic(b),
     riserva: () => riserva(),
+    versoBloccato: () => disposizione.versoBloccato(),
     suZoom: () => disposizione.disegnaManiglie(),
   });
   disposizione = creaDisposizione(ctx);

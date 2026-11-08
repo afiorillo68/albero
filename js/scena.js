@@ -3,7 +3,7 @@
 // partono tutti da qui, così mostrano la stessa cosa. Modulo puro.
 import { GEOMETRIA, impagina, generazioni } from "./layout.js";
 import { ingressoLayout, etichetteFasce, annoDi, statoInVita } from "./deduzioni.js";
-import { indici, ceppoDi, ignoto } from "./grafo.js";
+import { indici, ceppoDi, ignoto, componenti } from "./grafo.js";
 import { posizioneUnione, scartiBarre, altezzaBarra, percorsoPartner, percorsoFiglio, fasce } from "./geometria.js";
 
 const { W, H } = GEOMETRIA;
@@ -94,6 +94,37 @@ export function impaginaTesto(righe) {
   return { righe: righeFuse, h, basi };
 }
 
+// I legami di parentela danno la generazione relativa dentro un gruppo collegato, ma non
+// dicono dove sta un gruppo staccato dall'albero (una persona appena aggiunta, una coppia
+// ancora da collegare). Quel gruppo prende la generazione dalla riga in cui si trova: lo
+// scarto più votato fra i suoi membri rispetto alla riga dell'albero più vicina.
+const mediana = v => { const s = [...v].sort((a, b) => a - b), n = s.length; return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2; };
+export function generazioniDeiPezzi(albero, generazione, posPersona) {
+  const { gruppi } = componenti(albero);
+  if (gruppi.length < 2) return generazione;
+  const centri = new Map();
+  for (const id of gruppi[0]) {
+    const g = generazione[id];
+    if (!centri.has(g)) centri.set(g, []);
+    centri.get(g).push(posPersona(id).y + H / 2);
+  }
+  const righe = [...centri].map(([g, ys]) => [g, mediana(ys)]);
+  const rigaVicina = y => righe.reduce((m, r) => (Math.abs(r[1] - y) < Math.abs(m[1] - y) ? r : m))[0];
+  const out = { ...generazione };
+  for (const gruppo of gruppi.slice(1)) {
+    const voti = new Map();
+    for (const id of gruppo) {
+      const d = rigaVicina(posPersona(id).y + H / 2) - generazione[id];
+      voti.set(d, (voti.get(d) || 0) + 1);
+    }
+    const [scarto] = [...voti].sort((a, b) => b[1] - a[1] || Math.abs(a[0]) - Math.abs(b[0]))[0];
+    for (const id of gruppo) out[id] = generazione[id] + scarto;
+  }
+  const base = Math.min(...Object.values(out));
+  if (base < 0) for (const id of Object.keys(out)) out[id] -= base;
+  return out;
+}
+
 // opzioni.posizioni: posizioni provvisorie (trascinamento, «Ricompatta») per persone e unioni.
 // opzioni.archi: vertici provvisori degli archi.
 export function componiScena(albero, opzioni = {}) {
@@ -101,7 +132,6 @@ export function componiScena(albero, opzioni = {}) {
   const ix = indici(albero);
   const ingresso = ingressoLayout(albero);
   const { gen } = generazioni(ingresso);
-  const generazione = Object.fromEntries(gen);
   // soloAutomatico («Ricompatta»): posizioni provvisorie per le persone, il resto automatico
   const salvate = opzioni.soloAutomatico ? {} : albero.disposizione?.nodi || {};
   const provvisorie = opzioni.posizioni || {};
@@ -116,6 +146,7 @@ export function componiScena(albero, opzioni = {}) {
     automatiche = automatiche || impagina(ingresso).persone;
     return automatiche[id] || { x: 0, y: 0 };
   };
+  const generazione = generazioniDeiPezzi(albero, Object.fromEntries(gen), posPersona);
 
   const nodi = albero.persone.map(p => {
     const pos = posPersona(p.id);

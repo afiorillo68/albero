@@ -16,6 +16,21 @@ export function indici(albero) {
 
 export const coniugeIn = (u, p) => (u.partner[0] === p ? u.partner[1] : u.partner[0]);
 
+// Gruppi di persone collegate fra loro da unioni (come partner o come figli), dal più
+// numeroso: il primo è l'albero vero e proprio, gli altri sono pezzi ancora staccati.
+export function componenti(albero) {
+  const capo = new Map(albero.persone.map(p => [p.id, p.id]));
+  const radice = x => { while (capo.get(x) !== x) { capo.set(x, capo.get(capo.get(x))); x = capo.get(x); } return x; };
+  for (const u of albero.unioni) {
+    const membri = [...u.partner, ...u.figli].filter(id => capo.has(id));
+    for (const q of membri.slice(1)) { const a = radice(membri[0]), b = radice(q); if (a !== b) capo.set(b, a); }
+  }
+  const per = new Map();
+  for (const p of albero.persone) { const r = radice(p.id); if (!per.has(r)) per.set(r, []); per.get(r).push(p.id); }
+  const gruppi = [...per.values()].sort((a, b) => b.length - a.length);
+  return { gruppi, di: new Map(gruppi.flatMap((g, i) => g.map(id => [id, i]))) };
+}
+
 export function parenti(ix, id) {
   const uGen = ix.unione.get(ix.genitoriDi.get(id));
   const genitori = uGen ? [...uGen.partner] : [];

@@ -2,13 +2,21 @@
 // unioni, aggiungere, spostare e togliere vertici degli archi, griglia e guide di
 // allineamento, annulla e ripeti, ridisposizione automatica. Solo browser.
 import { GEOMETRIA, impagina } from "./layout.js";
-import { ingressoLayout } from "./deduzioni.js";
-import { discendenti, nomeCompleto } from "./grafo.js";
+import { ingressoLayout, annoDi } from "./deduzioni.js";
+import { discendenti, nomeCompleto, componenti } from "./grafo.js";
+import { fasce } from "./geometria.js";
 
 const { W, H } = GEOMETRIA;
 const NS = "http://www.w3.org/2000/svg";
 const PASSO_GRIGLIA = 10;
 const SOGLIA_GUIDA = 6;          // pixel sullo schermo
+// Confine della generazione: il riquadro si ferma a MARGINE_CONFINE dal bordo della fascia
+// e cede al massimo di CEDIMENTO pixel; oltre SOGLIA_SALTO pixel di trascinamento salta
+// alla generazione accanto, se nessun legame di parentela lo tiene dov'è.
+const MARGINE_CONFINE = 6;
+const CEDIMENTO = 12;
+const SOGLIA_SALTO = 56;
+const ANNI_TOLLERATI = 25;       // scarto massimo dalla nascita tipica della generazione di arrivo
 
 export function creaDisposizione(ctx) {
   let attivo = false;
@@ -16,6 +24,7 @@ export function creaDisposizione(ctx) {
   let arcoSel = null, unioneSel = null;
   let trascinamento = null;
   let archiAllInizio = {};       // le linee come erano quando si è aperta «Disposizione»
+  let versoBloccato = 0;         // +1 o -1 se il riquadro trascinato è fermo sul confine in basso o in alto
   const annullabili = [], ripetibili = [];
   let fotogramma = null;
 
@@ -57,12 +66,26 @@ export function creaDisposizione(ctx) {
     strato.innerHTML = html;
   }
 
+  // nello strato delle guide: le linee, ridisegnate a ogni movimento, e i lampi delle fasce
+  // di arrivo, che si spengono da soli
+  function gruppiGuide() {
+    const s = ctx.vista.strato.guide;
+    if (!s.querySelector(".linee")) s.innerHTML = `<g class="linee"></g><g class="lampi"></g>`;
+    return { linee: s.querySelector(".linee"), lampi: s.querySelector(".lampi") };
+  }
+
   function disegnaGuide(linee) {
-    const strato = ctx.vista.strato.guide;
     const b = ctx.scena().bbox;
-    strato.innerHTML = linee.map(l => (l.x !== undefined
+    gruppiGuide().linee.innerHTML = linee.map(l => (l.x !== undefined
       ? `<line x1="${l.x}" y1="${b.y}" x2="${l.x}" y2="${b.y2}"/>`
-      : `<line x1="${b.x}" y1="${l.y}" x2="${b.x2}" y2="${l.y}"/>`)).join("");
+      : `<line class="${l.classe || ""}" x1="${l.da ?? b.x}" y1="${l.y}" x2="${l.a ?? b.x2}" y2="${l.y}"/>`)).join("");
+  }
+
+  function lampo(f) {
+    const r = document.createElementNS(NS, "rect");
+    for (const [k, v] of Object.entries({ x: f.x, y: f.y, width: f.larghezza, height: f.altezza, class: "lampo" })) r.setAttribute(k, v);
+    gruppiGuide().lampi.append(r);
+    setTimeout(() => r.remove(), 800);
   }
 
   // ------------------------------------------------------------ salvataggio e annulla
@@ -122,6 +145,89 @@ export function creaDisposizione(ctx) {
     const altri = scena.nodi.filter(n => !dentro.has(n.id));
     trascinamento = { tipo: "nodi", ancora: b.id, unione: b.tipo === "unione", origini, inizio, altri, descr: b.tipo === "unione" ? "Spostato il nodo di un'unione"
       : ids.length > 1 ? `Spostati ${nomeCompleto(scena.ix.persona.get(b.id))} e i discendenti` : `Spostata ${nomeCompleto(scena.ix.persona.get(b.id))}` };
+    if (b.tipo === "persona") preparaConfini(trascinamento, scena, dentro);
+  }
+
+  // Fasce calcolate senza chi si sposta: sono i confini da rispettare. Il salto di
+  // generazione è possibile solo se si trascina un pezzo staccato dall'albero tutto intero.
+  function preparaConfini(t, scena, dentro) {
+    const fermi = Object.fromEntries(scena.nodi.filter(n => !dentro.has(n.id)).map(n => [n.id, { x: n.x, y: n.y, h: n.h }]));
+    const { gruppi, di } = componenti(ctx.albero());
+    const pezzo = di.get(t.ancora);
+    t.confini = {
+      strisce: fasce(scena.generazione, fermi),
+      generazione: { ...scena.generazione },
+      riquadri: new Map(scena.nodi.filter(n => dentro.has(n.id)).map(n => [n.id, { cima: n.cima, h: n.h }])),
+      libero: pezzo > 0 && gruppi[pezzo].every(id => dentro.has(id)),
+      salto: 0, avvisato: false,
+    };
+  }
+
+  // Spostamenti verticali ammessi (in unità del disegno) con s generazioni di salto; null se
+  // la generazione di arrivo non c'è.
+  function intervallo(c, s) {
+    let min = -Infinity, max = Infinity;
+    for (const [id, r] of c.riquadri) {
+      const g = c.generazione[id] + s;
+      const f = c.strisce.find(x => x.g === g);
+      let alto, basso;
+      if (f) { alto = f.y; basso = f.y + f.altezza; }
+      else if (s === 0) {          // unico della sua generazione: lo fermano le fasce vicine
+        const prima = c.strisce.filter(x => x.g < g).at(-1), dopo = c.strisce.find(x => x.g > g);
+        alto = prima ? prima.y + prima.altezza : -Infinity;
+        basso = dopo ? dopo.y : Infinity;
+      } else return null;
+      min = Math.max(min, alto + MARGINE_CONFINE - r.cima);
+      max = Math.min(max, basso - MARGINE_CONFINE - (r.cima + r.h));
+    }
+    if (min > max) return s === 0 ? { min: -Infinity, max: Infinity } : null;   // già fuori: non si blocca
+    return { min, max };
+  }
+
+  // Applica il confine allo spostamento verticale dy; restituisce dy corretto e la linea del confine da mostrare.
+  function rispettaConfini(t, dy) {
+    const c = t.confini, k = ctx.vista.scala();
+    const v = intervallo(c, c.salto);
+    const fuori = dy < v.min ? dy - v.min : dy > v.max ? dy - v.max : 0;
+    if (!fuori) return { dy };
+    const verso = Math.sign(fuori), oltre = Math.abs(fuori) * k;
+    const arrivo = c.libero && oltre > SOGLIA_SALTO ? intervallo(c, c.salto + verso) : null;
+    if (arrivo) {
+      c.salto += verso;
+      const f = c.strisce.find(x => x.g === c.generazione[t.ancora] + c.salto);
+      if (f) lampo(f);
+      navigator.vibrate?.(12);
+      return { dy: Math.min(arrivo.max, Math.max(arrivo.min, dy)) };
+    }
+    versoBloccato = c.libero ? 0 : verso;
+    const bloccato = !c.libero && oltre > SOGLIA_SALTO;
+    if (bloccato && !c.avvisato) {
+      c.avvisato = true;
+      ctx.avviso(`${nomeCompleto(ctx.scena().ix.persona.get(t.ancora))} resta nella sua generazione: la fissano genitori, figli e partner.`);
+    }
+    const r = c.riquadri.get(t.ancora);
+    const bordo = verso > 0 ? r.cima + r.h + v.max + MARGINE_CONFINE : r.cima + v.min - MARGINE_CONFINE;
+    const o = t.origini.get(t.ancora);
+    return {
+      dy: (verso > 0 ? v.max : v.min) + (verso * CEDIMENTO * (1 - Math.exp(-oltre / 40))) / k,
+      confine: { y: bordo, da: o.x + (t.mosso?.dx || 0) - 3 * W, a: o.x + (t.mosso?.dx || 0) + 4 * W, classe: bloccato ? "confine bloccato" : "confine" },
+    };
+  }
+
+  // Dopo un salto di generazione: la nascita di chi è saltato è compatibile con la generazione di arrivo?
+  function nasciteFuoriPosto(t) {
+    const c = t.confini, albero = ctx.albero(), ix = ctx.scena().ix;
+    const fuori = [];
+    for (const id of c.riquadri.keys()) {
+      const anno = annoDi(ix.persona.get(id)?.nascita?.data);
+      if (!anno) continue;
+      const g = c.generazione[id] + c.salto;
+      const anni = albero.persone.filter(p => !c.riquadri.has(p.id) && c.generazione[p.id] === g).map(p => annoDi(p.nascita?.data)).filter(Boolean);
+      if (!anni.length) continue;
+      const s = [...anni].sort((a, b) => a - b), tipica = s[Math.floor(s.length / 2)];
+      if (Math.abs(anno - tipica) > ANNI_TOLLERATI) fuori.push({ nome: nomeCompleto(ix.persona.get(id)), anno, tipica, quante: anni.length });
+    }
+    return fuori;
   }
 
   function muoviNodi(m, e) {
@@ -150,19 +256,38 @@ export function creaDisposizione(ctx) {
     } else if (!t.unione) { x = aggancia(x); y = aggancia(y); }
     if (e.shiftKey) { if (dx === 0) x = o.x; if (dy === 0) y = o.y; }
     dx = x - o.x; dy = y - o.y;
+    let bloccato = false;
+    versoBloccato = 0;
+    if (t.confini) {
+      const esito = rispettaConfini(t, dy);
+      dy = esito.dy;
+      if (esito.confine) {
+        linee.splice(0, linee.length, ...linee.filter(l => l.x !== undefined), esito.confine);
+        bloccato = esito.confine.classe.includes("bloccato");
+      }
+    }
+    document.getElementById("tela")?.classList.toggle("bloccato", bloccato);
     for (const [id, p] of t.origini) prov().posizioni[id] = { x: p.x + dx, y: p.y + dy };
     t.mosso = { dx, dy };
     disegnaGuide(linee);
     ridisegnaPresto();
   }
 
-  function fineNodi() {
-    const t = trascinamento;
+  async function fineNodi(t) {
+    versoBloccato = 0;
+    document.getElementById("tela")?.classList.remove("bloccato");
+    disegnaGuide([]);
     const campi = [...t.origini.keys()].map(id => {
       const p = prov().posizioni[id];
       return { sezione: "nodi", id, dopo: { x: Math.round(p.x), y: Math.round(p.y) } };
     });
-    disegnaGuide([]);
+    // un salto di generazione con una data di nascita fuori posto va confermato; «Annulla» riporta tutto dov'era
+    const fuori = t.confini?.salto ? nasciteFuoriPosto(t) : [];
+    if (fuori.length) {
+      const testo = fuori.map(f => `Data di nascita di ${f.nome}: ${f.anno}. Nella generazione di arrivo la nascita tipica è il ${f.tipica} (da ${f.quante} ${f.quante === 1 ? "data" : "date"}).`).join(" ")
+        + " Confermi lo spostamento?";
+      if (!(await ctx.conferma(testo, "Conferma"))) { pulisci(); return; }
+    }
     registra(campi, t.descr);
   }
 
@@ -202,12 +327,12 @@ export function creaDisposizione(ctx) {
       return;
     }
     if (!trascinamento) return;
-    if (fase === "annulla") { trascinamento = null; pulisci(); return; }
+    if (fase === "annulla") { trascinamento = null; versoBloccato = 0; document.getElementById("tela")?.classList.remove("bloccato"); pulisci(); return; }
     if (fase === "muovi") (trascinamento.tipo === "nodi" ? muoviNodi : muoviVertice)(m, e);
     if (fase === "fine") {
       const t = trascinamento;
       trascinamento = null;
-      if (t.tipo === "nodi" && t.mosso) fineNodi();
+      if (t.tipo === "nodi" && t.mosso) fineNodi(t);
       if (t.tipo === "vertice" && t.mosso) {
         registra([{ sezione: "archi", id: t.arco, dopo: { punti: t.interni.map(q => ({ x: Math.round(q.x), y: Math.round(q.y) })) } }], t.descr);
       }
@@ -296,6 +421,7 @@ export function creaDisposizione(ctx) {
   return {
     attiva, prendi, trascina, clic, doppioClic, disegnaManiglie, annulla, ripeti, raddrizza, ripristinaLinea, riallinea, ridisponi,
     get attivo() { return attivo; },
+    versoBloccato: () => versoBloccato,
     opzioni,
     stato: () => ({
       arcoManuale: !!(arcoSel && ctx.albero().disposizione?.archi?.[arcoSel]),

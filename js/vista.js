@@ -167,7 +167,10 @@ export function creaVista(svg, gestori = {}) {
     scorrimento = null;
     if (gesto?.tipo !== "trascina" || !gesto.mosso) return;
     const e = gesto.ultimo;
-    const { vx, vy } = velocitaBordo(e.clientX, e.clientY);
+    let { vx, vy } = velocitaBordo(e.clientX, e.clientY);
+    // un riquadro fermo sul confine della sua generazione: inutile scorrere oltre in quella direzione
+    const blocco = gestori.versoBloccato?.() || 0;
+    if ((blocco > 0 && vy < 0) || (blocco < 0 && vy > 0)) vy = 0;
     if (!vx && !vy) return;
     t = { ...t, x: t.x + vx, y: t.y + vy };
     applica();
