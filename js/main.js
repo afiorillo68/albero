@@ -159,6 +159,27 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 window.addEventListener("focus", controllaVersione);
 setInterval(controllaVersione, 30 * 60_000);
 
+// ------------------------------------------------------------ inquadratura al ricaricamento
+// Zoom e posizione restano nella scheda del browser (sessionStorage): un ricaricamento, anche
+// quello del telefono che riapre una scheda rimasta in sospeso, riparte da lì; una scheda nuova
+// parte dall'albero intero.
+const INQUADRATURA = "albero.inquadratura";
+
+function salvaInquadratura() {
+  if (!vista || !S.scena) return;
+  try { sessionStorage.setItem(INQUADRATURA, JSON.stringify(vista.inquadratura())); } catch { /* niente */ }
+}
+
+function inquadraturaSalvata() {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(INQUADRATURA));
+    return [v?.cx, v?.cy, v?.k].every(Number.isFinite) ? v : null;
+  } catch { return null; }
+}
+
+window.addEventListener("pagehide", salvaInquadratura);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") salvaInquadratura(); });
+
 // ------------------------------------------------------------ disegno
 function ridisegna() {
   if (!S.albero) return;
@@ -843,7 +864,9 @@ async function avvia() {
         if (S.primoDisegno) {
           S.primoDisegno = false;
           $("#avvio").hidden = true;
-          inquadraVisibili({ animato: false, kMax: ZOOM_PIENO });
+          const salvata = inquadraturaSalvata();
+          if (salvata) vista.ripristina(salvata);
+          else inquadraVisibili({ animato: false, kMax: ZOOM_PIENO });
           apriDaIndirizzo();
           controllaVersione();
         }

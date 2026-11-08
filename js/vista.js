@@ -83,6 +83,21 @@ export function creaVista(svg, gestori = {}) {
     if (animato) animaVerso(dest); else { t = dest; applica(); gestori.suZoom?.(t.k); }
   }
 
+  // centro della vista in coordinate del disegno, con la scala: vale anche se la finestra cambia misura
+  function inquadratura() {
+    const r = svg.getBoundingClientRect();
+    return { cx: (r.width / 2 - t.x) / t.k, cy: (r.height / 2 - t.y) / t.k, k: t.k };
+  }
+
+  function ripristina({ cx, cy, k }) {
+    cancelAnimationFrame(animazione);
+    const r = svg.getBoundingClientRect();
+    k = limitaK(k);
+    t = { k, x: r.width / 2 - cx * k, y: r.height / 2 - cy * k };
+    applica();
+    gestori.suZoom?.(t.k);
+  }
+
   function centraSu(x, y, { k = t.k, sinistra = 0, destra = 0, basso = 0 } = {}) {
     const r = svg.getBoundingClientRect();
     animaVerso({ k, x: sinistra + (r.width - sinistra - destra) / 2 - x * k, y: (r.height - basso) / 2 - y * k });
@@ -356,7 +371,7 @@ export function creaVista(svg, gestori = {}) {
 
   applica();
   return {
-    disegna, classi, inquadra, centraSu, daSchermo, increspa, postit,
+    disegna, classi, inquadra, inquadratura, ripristina, centraSu, daSchermo, increspa, postit,
     zoom: f => zoomIn(null, f),
     scala: () => t.k,
     larghezzaTestate: () => (righeTestate.length ? testate.offsetWidth : 0),
