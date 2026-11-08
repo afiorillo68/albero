@@ -111,8 +111,9 @@ function avviso(testo, tipo = "") {
   a.className = `avviso ${tipo}`;
   a.textContent = testo;
   $("#avvisi").append(a);
-  setTimeout(() => a.classList.add("via"), 3200);
-  setTimeout(() => a.remove(), 3800);
+  const durata = tipo === "errore" ? 7000 : 3200;          // un errore va letto fino in fondo
+  setTimeout(() => a.classList.add("via"), durata);
+  setTimeout(() => a.remove(), durata + 600);
 }
 
 function errore(err) {
