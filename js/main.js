@@ -204,6 +204,19 @@ function apriNodo(id, tipo, { centra = false, postit = false } = {}) {
   if (postit) $("#postit-scheda")?.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
+// ?nodo=<id> nell'indirizzo (le mail di notifica dei post-it): apre la scheda sui post-it,
+// una volta sola, e toglie il parametro perché ricaricando non si riapra.
+function apriDaIndirizzo() {
+  const u = new URL(location.href);
+  const id = u.searchParams.get("nodo");
+  if (!id) return;
+  u.searchParams.delete("nodo");
+  history.replaceState(null, "", u.pathname + u.search + u.hash);
+  const tipo = S.scena.ix.persona.has(id) ? "persona" : S.scena.ix.unione.has(id) ? "unione" : null;
+  if (tipo) apriNodo(id, tipo, { centra: true, postit: true });
+  else avviso("Il riquadro della notifica non è più nell'albero.");
+}
+
 // I post-it arrivano a parte: bollini sull'albero, contatore nella barra, pannelli aperti.
 function aggiornaPostit() {
   const conteggi = new Map();
@@ -789,6 +802,7 @@ async function avvia() {
           S.primoDisegno = false;
           $("#avvio").hidden = true;
           inquadraVisibili({ animato: false, kMax: ZOOM_PIENO });
+          apriDaIndirizzo();
         }
         // la scheda aperta segue le modifiche degli altri, ma non mentre la si compila
         const pan = S.pannello;
