@@ -84,9 +84,9 @@ export async function mostraStorico(ctx) {
       }
     }, corpo => {
       corpo.querySelector("[name=spostamenti]").addEventListener("change", e => { mostraSpostamenti = e.target.checked; disegna(); });
-    });
+    }, { tipo: "storico" });
   }
 
-  ctx.apriPannello("Storico delle modifiche", `<p class="vuoto">Carico lo storico…</p>`);
+  ctx.apriPannello("Storico delle modifiche", `<p class="vuoto">Carico lo storico…</p>`, null, null, { tipo: "storico" });
   try { await carica(); disegna(); } catch (err) { ctx.errore(err); }
 }

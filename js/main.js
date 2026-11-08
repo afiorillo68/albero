@@ -140,14 +140,74 @@ async function controllaVersione() {
 }
 
 // ricaricare la pagina non basta: per qualche minuto dopo la pubblicazione il browser terrebbe
-// i file vecchi in memoria; prima li si riprende dalla rete, poi si ricarica
+// i file vecchi in memoria; prima li si riprende dalla rete, poi si ricarica. La pagina riparte
+// com'era (vedi istantanea), una volta sola: ricaricando dal browser si riparte da capo.
+const RIPRISTINO = "albero.ripristino";
+
 async function ricarica() {
   if ((S.pannello?.modulo || document.querySelector("dialog[open]"))
     && !(await conferma("Ricaricando perdi quello che stai scrivendo e non hai ancora salvato. Ricarico adesso?", "Ricarica"))) return;
   const file = performance.getEntriesByType("resource").map(e => e.name)
     .filter(u => u.startsWith(location.origin) && /\.(js|css)$/.test(new URL(u).pathname));
   await Promise.allSettled(file.map(u => fetch(u, { cache: "reload" })));
+  try { sessionStorage.setItem(RIPRISTINO, JSON.stringify(istantanea())); } catch { /* si riparte da capo */ }
   location.reload();
+}
+
+// lo stato della pagina che si può rifare: inquadratura, selezione, filtri, isolamento, ricerche,
+// Disposizione e il pannello aperto (di un modulo a metà resta la scheda da cui era partito)
+function istantanea() {
+  const p = S.pannello;
+  return {
+    quando: Date.now(),
+    vista: S.scena ? vista.inquadratura() : null,
+    sel: S.sel, selUnione: S.selUnione,
+    filtri: Object.fromEntries(Object.entries(S.filtri).map(([k, v]) => [k, [...v]])),
+    isolamento: S.isolamento, soloVisibili: S.soloVisibili, ricompatta: !!S.ricompatta,
+    avanzata: S.avanzata, avanzataApplicata: S.avanzataApplicata,
+    cerca: $("#cerca").value, trovati: [...S.trovati],
+    disposizione: !$("#attrezzi").hidden,
+    pannello: !p ? null : p.modulo ? { persona: typeof p.di === "string" ? p.di : S.sel, unione: S.sel ? null : S.selUnione }
+      : { persona: p.persona, unione: typeof p.unione === "string" ? p.unione : null, tipo: p.tipo },
+    scorrimento: $("#pannello-corpo").scrollTop,
+  };
+}
+
+// letta e cancellata subito, perché valga per questo caricamento soltanto
+const daRipristinare = (() => {
+  try {
+    const r = JSON.parse(sessionStorage.getItem(RIPRISTINO));
+    sessionStorage.removeItem(RIPRISTINO);
+    return r && Date.now() - r.quando < 5 * 60_000 ? r : null;
+  } catch { return null; }
+})();
+
+async function ripristinaStato(r) {
+  const ix = S.scena.ix;
+  S.sel = ix.persona.has(r.sel) ? r.sel : null;
+  S.selUnione = ix.unione.has(r.selUnione) ? r.selUnione : null;
+  S.filtri = Object.fromEntries(Object.entries(filtriVuoti()).map(([k, v]) => [k, new Set(r.filtri?.[k] || v)]));
+  S.isolamento = r.isolamento;
+  S.soloVisibili = !!r.soloVisibili;
+  if (r.avanzata) S.avanzata = r.avanzata;
+  S.avanzataApplicata = r.avanzataApplicata;
+  $("#cerca").value = r.cerca || "";
+  S.trovati = new Set(r.trovati || []);
+  applicaClassi();
+  if (r.ricompatta && S.isolamento && S.soloVisibili) ricompatta(true);
+  if (r.disposizione && ctx.modifica) attivaDisposizione(true);
+  if (r.vista) vista.ripristina(r.vista); else inquadraVisibili({ animato: false, kMax: ZOOM_PIENO });
+  const p = r.pannello;
+  if (p?.persona && ix.persona.has(p.persona)) mostraPersona(ctx, p.persona);
+  else if (p?.unione && ix.unione.has(p.unione)) mostraUnione(ctx, p.unione);
+  else if (p?.tipo === "filtri") mostraFiltri();
+  else if (p?.tipo === "avanzata") mostraAvanzata();
+  else if (p?.tipo === "esporta") mostraEsporta();
+  else if (p?.tipo === "menu") mostraMenu();
+  else if (p?.tipo === "postit") mostraTuttiPostit(ctx);
+  else if (p?.tipo === "storico" && ctx.modifica) await mostraStorico(ctx);
+  if (S.pannello) $("#pannello-corpo").scrollTop = r.scorrimento || 0;
+  avviso("Albero aggiornato alla versione nuova.");
 }
 
 $("#versione").addEventListener("click", e => {
@@ -158,27 +218,6 @@ $("#versione").addEventListener("click", e => {
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") controllaVersione(); });
 window.addEventListener("focus", controllaVersione);
 setInterval(controllaVersione, 30 * 60_000);
-
-// ------------------------------------------------------------ inquadratura al ricaricamento
-// Zoom e posizione restano nella scheda del browser (sessionStorage): un ricaricamento, anche
-// quello del telefono che riapre una scheda rimasta in sospeso, riparte da lì; una scheda nuova
-// parte dall'albero intero.
-const INQUADRATURA = "albero.inquadratura";
-
-function salvaInquadratura() {
-  if (!vista || !S.scena) return;
-  try { sessionStorage.setItem(INQUADRATURA, JSON.stringify(vista.inquadratura())); } catch { /* niente */ }
-}
-
-function inquadraturaSalvata() {
-  try {
-    const v = JSON.parse(sessionStorage.getItem(INQUADRATURA));
-    return [v?.cx, v?.cy, v?.k].every(Number.isFinite) ? v : null;
-  } catch { return null; }
-}
-
-window.addEventListener("pagehide", salvaInquadratura);
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") salvaInquadratura(); });
 
 // ------------------------------------------------------------ disegno
 function ridisegna() {
@@ -864,9 +903,9 @@ async function avvia() {
         if (S.primoDisegno) {
           S.primoDisegno = false;
           $("#avvio").hidden = true;
-          const salvata = inquadraturaSalvata();
-          if (salvata) vista.ripristina(salvata);
-          else inquadraVisibili({ animato: false, kMax: ZOOM_PIENO });
+          if (daRipristinare) {
+            ripristinaStato(daRipristinare).catch(err => { console.error(err); inquadraVisibili({ animato: false, kMax: ZOOM_PIENO }); });
+          } else inquadraVisibili({ animato: false, kMax: ZOOM_PIENO });
           apriDaIndirizzo();
           controllaVersione();
         }
