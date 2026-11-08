@@ -8,8 +8,13 @@ const MESI = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "lug
 const SI_NO = [["sì", "sì"], ["no", "no"]];
 const siNo = v => (v ? "sì" : "no");
 
-// Contesto di valutazione, ricavato dalla scena: indici, generazione di ogni persona, fasce.
-export const contesto = (scena, oggi = new Date()) => ({ ix: scena.ix, generazione: scena.generazione, fasce: scena.fasce, oggi });
+// Contesto di valutazione, ricavato dalla scena: indici, generazione di ogni persona, fasce;
+// più i testi dei post-it per persona.
+export function contesto(scena, oggi = new Date(), postit = []) {
+  const testi = new Map();
+  for (const n of postit) testi.set(n.nodo, [...(testi.get(n.nodo) || []), n.testo]);
+  return { ix: scena.ix, generazione: scena.generazione, fasce: scena.fasce, oggi, postit: testi };
+}
 
 const unioniDa = (cx, p) => (cx.ix.unioniDi.get(p.id) || []).map(uid => cx.ix.unione.get(uid)).filter(Boolean);
 const veri = (cx, ids) => ids.filter(id => !cx.ix.persona.get(id)?.segnaposto);
@@ -29,6 +34,7 @@ export const CAMPI = {
   noteUnioni: { gruppo: "Testo", etichetta: "Note e fonti delle sue unioni", tipo: "testo",
     leggi: (p, cx) => unioniDa(cx, p).flatMap(u => [u.note, u.fonte]) },
   modificatoDa: { gruppo: "Testo", etichetta: "Ultima modifica fatta da", tipo: "testo", leggi: p => [p.aggiornato?.chi] },
+  postit: { gruppo: "Testo", etichetta: "Testo dei post-it", tipo: "testo", leggi: (p, cx) => cx.postit?.get(p.id) || [] },
 
   annoNascita: { gruppo: "Date ed età", etichetta: "Anno di nascita", tipo: "numero", misura: "anno", leggi: p => annoDi(p.nascita?.data) },
   meseNascita: { gruppo: "Date ed età", etichetta: "Mese di nascita", tipo: "elenco",

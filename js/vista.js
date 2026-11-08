@@ -11,7 +11,7 @@ export function creaVista(svg, gestori = {}) {
   const mondo = document.createElementNS(NS, "g");
   mondo.setAttribute("id", "mondo");
   const strato = {};
-  for (const nome of ["fasce", "archi", "unioni", "nodi", "onde", "guide", "maniglie"]) {
+  for (const nome of ["fasce", "archi", "unioni", "nodi", "postit", "onde", "guide", "maniglie"]) {
     strato[nome] = document.createElementNS(NS, "g");
     strato[nome].setAttribute("class", `strato-${nome}`);
     mondo.append(strato[nome]);
@@ -27,7 +27,8 @@ export function creaVista(svg, gestori = {}) {
 
   let t = { x: 0, y: 0, k: 1 };
   let scena = null;
-  const elementi = { persona: new Map(), unione: new Map(), arco: new Map() };
+  const elementi = { persona: new Map(), unione: new Map(), arco: new Map(), postit: new Map() };
+  let conteggiPostit = new Map();     // id della persona o dell'unione -> quanti post-it
 
   function posizionaTestate() {
     for (const { el, f } of righeTestate) {
@@ -143,6 +144,28 @@ export function creaVista(svg, gestori = {}) {
       + `</div>`).join("");
     righeTestate = [...testate.children].map((el, i) => ({ el, f: scena.fasce[i] }));
     posizionaTestate();
+    disegnaPostit();
+  }
+
+  // Bollino giallo, un po' storto, sull'angolo in alto a destra del riquadro (o accanto al
+  // nodo dell'unione), con il numero dei post-it.
+  function disegnaPostit() {
+    if (!scena) return;
+    const posto = new Map([...scena.nodi.map(n => [n.id, { x: n.x + n.w - 13, y: n.cima - 11 }]),
+      ...scena.unioni.map(u => [u.id, { x: u.x + 7, y: u.y - 24 }])]);
+    strato.postit.innerHTML = [...conteggiPostit].filter(([id]) => posto.has(id)).map(([id, n]) => {
+      const { x, y } = posto.get(id);
+      return `<g class="postit" data-postit="${esc(id)}" transform="translate(${x} ${y}) rotate(7 11 10)">`
+        + `<rect width="22" height="20" rx="2.5" fill="#ffe873" stroke="#d6b300" stroke-width="1"/>`
+        + `<text x="11" y="14.5" text-anchor="middle" font-size="11.5" font-weight="700" fill="#5c4a00">${n}</text></g>`;
+    }).join("");
+    elementi.postit.clear();
+    for (const el of strato.postit.querySelectorAll("[data-postit]")) elementi.postit.set(el.dataset.postit, el);
+  }
+
+  function postit(conteggi) {
+    conteggiPostit = conteggi;
+    disegnaPostit();
   }
 
   // classi: {selezionata, unioneSelezionata, arcoSelezionato, attenuati: Set, nascosti: Set, evidenziati: Set}
@@ -164,6 +187,12 @@ export function creaVista(svg, gestori = {}) {
       el.classList.toggle("nascosto", u.partner.every(p => nas.has(p)));
       el.classList.toggle("attenuato", u.partner.every(p => att.has(p) || nas.has(p)));
     }
+    // i bollini seguono il riquadro a cui sono attaccati
+    for (const [id, el] of elementi.postit) {
+      const rif = elementi.persona.get(id) || elementi.unione.get(id);
+      el.classList.toggle("nascosto", !!rif?.classList.contains("nascosto"));
+      el.classList.toggle("attenuato", !!rif?.classList.contains("attenuato"));
+    }
     for (const a of scena.archi) {
       const el = elementi.arco.get(a.id);
       const u = unione.get(a.unione);
@@ -177,6 +206,8 @@ export function creaVista(svg, gestori = {}) {
   function bersaglio(el) {
     const m = el?.closest?.("[data-maniglia]");
     if (m) return { tipo: "maniglia", maniglia: m.dataset.maniglia, indice: Number(m.dataset.indice), id: m.dataset.id };
+    const pi = el?.closest?.("[data-postit]");
+    if (pi) return { tipo: "postit", id: pi.dataset.postit };
     const p = el?.closest?.("[data-persona]:not([data-arco])");
     if (p && p.classList.contains("nodo")) return { tipo: "persona", id: p.dataset.persona };
     const u = el?.closest?.(".unione[data-unione]");
@@ -325,7 +356,7 @@ export function creaVista(svg, gestori = {}) {
 
   applica();
   return {
-    disegna, classi, inquadra, centraSu, daSchermo, increspa,
+    disegna, classi, inquadra, centraSu, daSchermo, increspa, postit,
     zoom: f => zoomIn(null, f),
     scala: () => t.k,
     larghezzaTestate: () => (righeTestate.length ? testate.offsetWidth : 0),

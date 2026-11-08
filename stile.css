@@ -90,6 +90,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .comandi button:hover { background: rgba(255, 255, 255, .14); }
 .comandi button.attiva { background: rgba(255, 255, 255, .26); }
+.comandi .conta {
+  min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; display: grid; place-items: center;
+  background: #ffe873; color: #5c4a00; font-size: 11px; font-weight: 700; line-height: 1;
+}
 .modo-lettura .solo-modifica { display: none !important; }
 
 /* ------------------------------------------------ nastro */
@@ -305,6 +309,26 @@ select[size] { padding: 4px !important; }
 .avviso.via { opacity: 0; transform: translateY(8px); }
 
 .cornice-stampa { position: fixed; width: 0; height: 0; border: 0; visibility: hidden; }
+
+/* ------------------------------------------------ post-it */
+.postit { cursor: pointer; }
+.postit rect { filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .25)); }
+.postit:hover rect { fill: #fff09e; }
+.biglietto {
+  background: #fff4a8; border: 1px solid #ecd770; border-radius: 4px 4px 12px 4px; padding: 10px 12px 8px; margin-bottom: 8px;
+  box-shadow: 0 2px 5px rgba(120, 100, 0, .13); transform: rotate(-.4deg);
+}
+.biglietto:nth-of-type(even) { transform: rotate(.35deg); }
+.biglietto p { margin: 0 0 6px; line-height: 1.5; }
+.biglietto .firma { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; font-size: 12.5px; color: #6e5d10; }
+.comandi-postit { display: inline-flex; gap: 10px; }
+.aggiungi-postit {
+  width: 100%; padding: 9px 12px; border: 1.5px dashed #d9c25a; border-radius: 10px; background: #fffbe0; color: #5c4a00; cursor: pointer; font-size: 14px;
+}
+.aggiungi-postit:hover { background: #fff4a8; }
+.gruppo-postit { margin-top: 18px; }
+.titolo-postit { display: inline-block; margin-bottom: 8px; font-size: 14px; font-weight: 600; }
+.titolo-postit.tolto { color: var(--tenue); font-style: italic; font-weight: 400; }
 
 /* ------------------------------------------------ ricerca avanzata */
 .avanzata .condizioni { display: flex; flex-direction: column; gap: 6px; }

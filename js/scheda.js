@@ -5,6 +5,7 @@ import { parenti, nomeCompleto, cerca, coniugeIn, ignoto } from "./grafo.js";
 import { normalizzaData, formattaData, statoInVita, TESTO_IN_VITA, eta, annoDi, generazioneSociologica } from "./deduzioni.js";
 import { collocaNuova } from "./geometria.js";
 import { idArcoPartner, idArcoFiglio, NEUTRO } from "./scena.js";
+import { sezionePostit, gestisciPostit, azioneDiPostit } from "./postit.js";
 
 // ------------------------------------------------------------ utilità
 
@@ -80,6 +81,7 @@ export function mostraPersona(ctx, id) {
         <h3>Note</h3>
         ${p.note ? `<p>${testoNote(p.note)}</p>` : `<p class="vuoto">Nessuna nota.${modifica ? ` <button type="button" class="collegamento" data-azione="modifica">Aggiungine una</button>` : ""}</p>`}
       </section>
+      ${p.segnaposto ? "" : sezionePostit(ctx, id)}
       ${r.genitori.length ? `<section><h3>Genitori</h3><div class="chips">${r.genitori.map(g => chip(ctx, g)).join("")}</div></section>` : ""}
       ${r.unioni.length ? `<section><h3>Partner e figli</h3>${unioni}</section>` : ""}
       ${r.fratelli.length ? `<section><h3>Fratelli e sorelle</h3><div class="chips">${r.fratelli.map(f => chip(ctx, f)).join("")}</div></section>` : ""}
@@ -104,7 +106,8 @@ export function mostraPersona(ctx, id) {
     </article>`;
 
   ctx.apriPannello(nomeCompleto(p), html, async (azione, el) => {
-    if (azione === "vai") ctx.seleziona(el.dataset.id, { centra: true });
+    if (azioneDiPostit(azione)) gestisciPostit(ctx, azione, el, { nodo: id, tipo: "persona" });
+    else if (azione === "vai") ctx.seleziona(el.dataset.id, { centra: true });
     else if (azione === "unione") mostraUnione(ctx, el.dataset.id);
     else if (azione === "isola") ctx.isola(el.dataset.tipo, id);
     else if (azione === "modifica") modificaPersona(ctx, id);
@@ -445,6 +448,7 @@ export function mostraUnione(ctx, uid) {
       <section><h3>Figli</h3>${u.figli.length ? `<div class="chips">${u.figli.map(f => chip(ctx, f)).join("")}</div>` : `<p class="vuoto">Nessun figlio indicato.</p>`}</section>
       <section class="note-persona"><h3>Note</h3>${u.note ? `<p>${testoNote(u.note)}</p>` : `<p class="vuoto">Nessuna nota.</p>`}</section>
       ${u.fonte ? `<section><h3>Fonte</h3><p>${esc(u.fonte)}</p></section>` : ""}
+      ${sezionePostit(ctx, uid)}
       ${modifica ? `<section class="azioni">
         <button type="button" class="primario" data-azione="modifica">Modifica</button>
         <button type="button" data-azione="figlio">Aggiungi figlio</button>
@@ -453,7 +457,8 @@ export function mostraUnione(ctx, uid) {
       ${u.aggiornato?.chi ? `<p class="aggiornato">Ultima modifica: ${esc(u.aggiornato.chi)}, ${esc(quando(u.aggiornato.quando))}</p>` : ""}
     </article>`;
   ctx.apriPannello("Unione", html, async (azione, el) => {
-    if (azione === "vai") ctx.seleziona(el.dataset.id, { centra: true });
+    if (azioneDiPostit(azione)) gestisciPostit(ctx, azione, el, { nodo: uid, tipo: "unione" });
+    else if (azione === "vai") ctx.seleziona(el.dataset.id, { centra: true });
     else if (azione === "figlio") aggiungiFiglio(ctx, u.partner[0], uid);
     else if (azione === "modifica") modificaUnione(ctx, uid);
     else if (azione === "elimina") {

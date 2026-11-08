@@ -1,9 +1,9 @@
 // Dati condivisi su Firestore: apertura con il link di lettura o di modifica, ascolto in
-// tempo reale, scritture a lotti con la voce di storico, ripristino. Solo browser.
+// tempo reale, scritture a lotti con la voce di storico, ripristino, post-it. Solo browser.
 import { initializeApp } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js";
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, memoryLocalCache,
-  doc, collection, onSnapshot, getDoc, getDocs, setDoc, writeBatch, serverTimestamp,
+  doc, collection, onSnapshot, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp,
   FieldPath, deleteField, query, orderBy, limit, startAfter, where,
 } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js";
@@ -28,17 +28,20 @@ const senzaId = ({ id, ...resto }) => resto;
 const senzaAggiornato = ({ aggiornato, ...resto }) => resto;
 
 // chiave: {tipo: "lettura"|"modifica", valore}; nome(): come si chiama chi modifica
-export async function apri(configurazione, chiave, { suCambio, suErrore, suStatoRete, nome }) {
+// suPostit(elenco): i post-it, che arrivano a parte e non ritardano l'apertura
+export async function apri(configurazione, chiave, { suCambio, suErrore, suStatoRete, suPostit, nome }) {
   const { app, db } = avviaFirebase(configurazione);
-  let kL, uid = null;
+  let kL;
   const modifica = chiave.tipo === "modifica";
+  // l'identità anonima resta legata al browser: con il link di lettura si crea solo al primo post-it
+  const auth = getAuth(app);
+  await auth.authStateReady();
+  let uid = auth.currentUser?.uid || null;
 
   if (modifica) {
     const segreto = await getDoc(doc(db, "segreti", chiave.valore)).catch(() => null);
     if (!segreto?.exists()) throw new ErroreLink("Il link di modifica non è valido, oppure è stato sostituito con uno nuovo.");
     kL = segreto.data().albero;
-    const auth = getAuth(app);
-    await auth.authStateReady();
     const utente = auth.currentUser || (await signInAnonymously(auth)).user;
     uid = utente.uid;
     const rif = doc(db, "editori", uid);
@@ -147,5 +150,32 @@ export async function apri(configurazione, chiave, { suCambio, suErrore, suStato
     await salva({ operazioni, disposizione, meta, descrizione });
   }
 
-  return { modifica, uid, salva, storico, ripristina, attuale };
+  // Post-it: li legge e li aggiunge chiunque abbia il link; li cambia o li toglie chi li ha
+  // scritti, dallo stesso browser, oppure chi ha il link di modifica (lo controllano le regole).
+  const postit = collection(db, "alberi", kL, "postit");
+  onSnapshot(postit, s => suPostit?.(s.docs.map(d => ({ id: d.id, ...d.data() }))),
+    err => console.warn("Post-it non leggibili:", err));
+
+  async function identita() {
+    if (!uid) uid = (await signInAnonymously(auth)).user.uid;
+    return uid;
+  }
+  const firma = () => (nome() || "qualcuno").slice(0, 60);
+
+  async function aggiungiPostit({ nodo, tipo, testo }) {
+    const io = await identita();
+    await addDoc(postit, { nodo, tipo, testo, autore: firma(), uid: io, creato: serverTimestamp(), aggiornato: serverTimestamp() });
+  }
+
+  async function modificaPostit(id, testo) {
+    await identita();
+    await updateDoc(doc(postit, id), { testo, modificatoDa: firma(), aggiornato: serverTimestamp() });
+  }
+
+  async function togliPostit(id) {
+    await identita();
+    await deleteDoc(doc(postit, id));
+  }
+
+  return { modifica, mioUid: () => uid, salva, storico, ripristina, attuale, aggiungiPostit, modificaPostit, togliPostit };
 }

@@ -13,6 +13,7 @@ import { ingressoLayout, annoDi, statoInVita } from "./deduzioni.js";
 import { filtriVuoti, attivi, visibilita, descriviIsolamento, ALTRI, MANCANTI, VOCI_VITA } from "./filtri.js";
 import { mostraPersona, mostraUnione, nuovaPersonaLibera } from "./scheda.js";
 import { mostraStorico } from "./storico.js";
+import { mostraTuttiPostit } from "./postit.js";
 import { CAMPI, GRUPPI, operatori, senzaValore, nuovaCondizione, criteriVuoti, completa, attiva as avanzataAttiva,
   valuta, contesto, descrivi } from "./ricerca.js";
 
@@ -50,6 +51,7 @@ const S = {
   provvisorie: { posizioni: {}, archi: {} }, pulire: false, evidenziati: new Set(), trovati: new Set(),
   // ricerca avanzata: i criteri in modifica nel pannello e quelli applicati all'albero
   avanzata: criteriVuoti(), avanzataApplicata: null, esitoAvanzata: null,
+  postit: [],
   pannello: null, primoDisegno: true,
 };
 let dati = null, vista = null, disposizione = null;
@@ -57,12 +59,15 @@ let dati = null, vista = null, disposizione = null;
 // ------------------------------------------------------------ pannello laterale, dialoghi, avvisi
 function apriPannello(titolo, html, suAzione = null, prepara = null, contesto = {}) {
   const p = $("#pannello");
+  // ridisegnando lo stesso pannello (la stessa scheda, la stessa ricerca) si resta dove si era
+  const stesso = !p.hidden && S.pannello && Object.keys(contesto).length && Object.entries(contesto).every(([k, v]) => S.pannello[k] === v);
   p.hidden = false;
   document.body.classList.add("con-pannello");
   $("#pannello-titolo").textContent = titolo;
   const corpo = $("#pannello-corpo");
+  const scorrimento = stesso ? corpo.scrollTop : 0;
   corpo.innerHTML = html;
-  corpo.scrollTop = 0;
+  corpo.scrollTop = scorrimento;
   S.pannello = { suAzione, modulo: !!corpo.querySelector("form"), ...contesto };
   prepara?.(corpo);
 }
@@ -125,7 +130,7 @@ function ridisegna() {
   disposizione.disegnaManiglie();
 }
 
-const risultatiAvanzati = criteri => (S.scena && avanzataAttiva(criteri) ? valuta(S.albero, contesto(S.scena), criteri) : null);
+const risultatiAvanzati = criteri => (S.scena && avanzataAttiva(criteri) ? valuta(S.albero, contesto(S.scena, new Date(), S.postit), criteri) : null);
 
 function applicaClassi() {
   if (!S.scena) return;
@@ -183,6 +188,37 @@ function seleziona(id, { centra = false, pannello = true } = {}) {
     applicaClassi();
     setTimeout(() => { S.evidenziati = new Set(); applicaClassi(); }, 1800);
   }
+}
+
+// Apre la scheda di una persona o di un'unione; con «postit» scorre fino ai post-it.
+function apriNodo(id, tipo, { centra = false, postit = false } = {}) {
+  if (tipo === "persona") seleziona(id, { centra });
+  else {
+    S.sel = null;
+    S.selUnione = id;
+    applicaClassi();
+    mostraUnione(ctx, id);
+    const u = S.scena.unioni.find(x => x.id === id);
+    if (centra && u) vista.centraSu(u.x, u.y, riserva());
+  }
+  if (postit) $("#postit-scheda")?.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+// I post-it arrivano a parte: bollini sull'albero, contatore nella barra, pannelli aperti.
+function aggiornaPostit() {
+  const conteggi = new Map();
+  for (const n of S.postit) conteggi.set(n.nodo, (conteggi.get(n.nodo) || 0) + 1);
+  vista.postit(conteggi);
+  const c = $("#b-postit .conta");
+  c.textContent = S.postit.length;
+  c.hidden = !S.postit.length;
+  if (!S.scena) return;
+  applicaClassi();
+  const pan = S.pannello;
+  if (!pan || pan.modulo || document.querySelector("dialog[open]")) return;
+  if (pan.persona) mostraPersona(ctx, pan.persona);
+  else if (pan.unione) mostraUnione(ctx, pan.unione);
+  else if (pan.tipo === "postit") mostraTuttiPostit(ctx);
 }
 
 function isola(tipo, id) {
@@ -331,7 +367,6 @@ function mostraAvanzata({ fuoco = null } = {}) {
   if (!S.scena) return;
   const A = S.avanzata, cx = contesto(S.scena);
   const corpo = $("#pannello-corpo");
-  const scorrimento = S.pannello?.tipo === "avanzata" ? corpo.scrollTop : 0;
   const coloriCeppi = new Map(S.scena.ceppi.map(c => [c.cognome, `--c:${c.riempimento};--b:${c.bordo}`]));
   const persone = S.albero.persone.filter(p => !p.segnaposto).sort(perCognome);
 
@@ -435,7 +470,6 @@ function mostraAvanzata({ fuoco = null } = {}) {
       if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); applicaAvanzata(); }
     });
   }, { tipo: "avanzata" });
-  corpo.scrollTop = scorrimento;
   if (fuoco) corpo.querySelector(fuoco)?.focus();
 }
 
@@ -580,7 +614,7 @@ function mostraEsporta() {
 // ------------------------------------------------------------ menu e impostazioni
 function chiediNome(obbligatorio = false) {
   return dialogo(`<form method="dialog" class="modulo"><h2>Come ti chiami?</h2>
-    <p class="spiegazione">Il nome compare nello storico accanto alle tue modifiche, così gli altri sanno chi ha cambiato cosa. Resta su questo dispositivo.</p>
+    <p class="spiegazione">Il nome compare accanto ai tuoi post-it${ctx.modifica ? " e alle tue modifiche nello storico" : ""}, così gli altri sanno chi ha scritto cosa. Resta su questo dispositivo.</p>
     <input name="nome" value="${esc(memoria.leggi("nome") || "")}" autocomplete="given-name" required>
     <div class="azioni"><button value="ok" class="primario">Va bene</button>${obbligatorio ? "" : '<button value="no" formnovalidate>Annulla</button>'}</div></form>`,
   (d, chiudi) => {
@@ -600,8 +634,8 @@ function mostraMenu() {
   const modifica = ctx.modifica;
   apriPannello("Menu", `<div class="menu">
     <section><h3>Questo link</h3><p>${modifica ? "Puoi <b>leggere e modificare</b>. Non inoltrarlo: per far vedere l'albero a qualcuno c'è il link in sola lettura." : "Puoi <b>leggere</b> l'albero, non modificarlo."}</p></section>
-    ${modifica ? `<section><h3>Il tuo nome</h3><p>${esc(memoria.leggi("nome") || "non indicato")} <button type="button" class="collegamento" data-azione="nome">cambia</button></p></section>
-    <section><h3>Impostazioni dell'albero</h3>
+    <section><h3>Il tuo nome</h3><p>${esc(memoria.leggi("nome") || "non indicato")} <button type="button" class="collegamento" data-azione="nome">cambia</button></p></section>
+    ${modifica ? `<section><h3>Impostazioni dell'albero</h3>
       <label>Titolo <input name="titolo" value="${esc(S.albero.meta?.titolo || "")}"></label>
       <label>Raggio delle curve: <output name="valore">${S.scena.raggio}</output> px
         <input type="range" name="raggio" min="0" max="40" step="1" value="${S.scena.raggio}"></label>
@@ -612,6 +646,7 @@ function mostraMenu() {
       <li>Tocca una persona per la sua scheda; da lì puoi isolarne antenati, discendenti, famiglia o generazione.</li>
       <li>I colori sono le famiglie d'origine: toccali nel nastro in alto per filtrare.</li>
       <li>Il pulsante a cursori nella casella di ricerca apre la ricerca avanzata: condizioni su tutti i campi, anche età e parentele, da combinare.</li>
+      <li>Dalla scheda di una persona o di un'unione puoi lasciare un post-it, per esempio per suggerire una correzione: lo vedono tutti, e lo cambi o lo togli tu dallo stesso dispositivo${modifica ? ", oppure chiunque abbia il link di modifica" : ""}.</li>
       ${modifica ? "<li>«Disposizione» serve a sistemare il disegno: trascina le persone (con Alt anche i discendenti), tocca una linea per piegarla.</li><li>Ogni modifica finisce nello «Storico», da cui si può ripristinare.</li>" : ""}
       <li>† indica chi non è più in vita: lo si deduce dalla data di morte.</li>
     </ul></section>
@@ -705,6 +740,16 @@ const ctx = {
   },
   storico: o => dati.storico(o),
   ripristina: (g, d) => dati.ripristina(g, d),
+  // post-it
+  dati: () => dati,
+  postit: () => S.postit,
+  mioUid: () => dati?.mioUid(),
+  apriNodo,
+  nomeAutore: async () => memoria.leggi("nome") || chiediNome(),
+  async attendiPoco(promessa) {
+    promessa.catch(errore);
+    await Promise.race([promessa, new Promise(ok => setTimeout(ok, 600))]);
+  },
 };
 
 // ------------------------------------------------------------ avvio
@@ -719,7 +764,8 @@ async function avvia() {
     trascina: (fase, m, e, b) => disposizione.trascina(fase, m, e, b),
     clic: b => {
       if (disposizione.clic(b)) { applicaClassi(); if (b.tipo === "vuoto") { S.sel = null; S.selUnione = null; chiudiPannello(); applicaClassi(); } return; }
-      if (b.tipo === "persona") seleziona(b.id);
+      if (b.tipo === "postit") apriNodo(b.id, S.scena.ix.persona.has(b.id) ? "persona" : "unione", { postit: true });
+      else if (b.tipo === "persona") seleziona(b.id);
       else if (b.tipo === "unione") { S.sel = null; S.selUnione = b.id; applicaClassi(); mostraUnione(ctx, b.id); }
       else if (b.tipo === "arco") { const a = S.scena.archi.find(x => x.id === b.id); if (a) { S.sel = null; S.selUnione = a.unione; applicaClassi(); mostraUnione(ctx, a.unione); } }
       else { S.sel = null; S.selUnione = null; chiudiPannello(); applicaClassi(); }
@@ -754,6 +800,7 @@ async function avvia() {
         aggiornaAttrezzi();
       },
       suErrore: err => errore(err),
+      suPostit: elenco => { S.postit = elenco; aggiornaPostit(); },
       suStatoRete: ({ inSospeso, daCache }) => {
         const r = $("#rete");
         r.textContent = inSospeso ? "Salvataggio…" : daCache ? "Non in linea" : "";
@@ -775,6 +822,7 @@ async function avvia() {
   preparaAttrezzi();
   $("#b-filtri").addEventListener("click", () => (S.pannello?.tipo === "filtri" ? chiudiPannello() : mostraFiltri()));
   $("#b-avanzata").addEventListener("click", apriAvanzata);
+  $("#b-postit").addEventListener("click", () => (S.pannello?.tipo === "postit" ? chiudiPannello() : mostraTuttiPostit(ctx)));
   $("#b-esporta").addEventListener("click", () => (S.pannello?.tipo === "esporta" ? chiudiPannello() : mostraEsporta()));
   $("#b-menu").addEventListener("click", () => (S.pannello?.tipo === "menu" ? chiudiPannello() : mostraMenu()));
   $("#b-storico").addEventListener("click", () => mostraStorico(ctx));
