@@ -81,7 +81,7 @@ export function mostraPersona(ctx, id) {
         <h3>Note</h3>
         ${p.note ? `<p>${testoNote(p.note)}</p>` : `<p class="vuoto">Nessuna nota.${modifica ? ` <button type="button" class="collegamento" data-azione="modifica">Aggiungine una</button>` : ""}</p>`}
       </section>
-      ${p.segnaposto ? "" : sezionePostit(ctx, id)}
+      ${p.segnaposto ? "" : sezionePostit(ctx, id, "persona")}
       ${r.genitori.length ? `<section><h3>Genitori</h3><div class="chips">${r.genitori.map(g => chip(ctx, g)).join("")}</div></section>` : ""}
       ${r.unioni.length ? `<section><h3>Partner e figli</h3>${unioni}</section>` : ""}
       ${r.fratelli.length ? `<section><h3>Fratelli e sorelle</h3><div class="chips">${r.fratelli.map(f => chip(ctx, f)).join("")}</div></section>` : ""}
@@ -448,7 +448,7 @@ export function mostraUnione(ctx, uid) {
       <section><h3>Figli</h3>${u.figli.length ? `<div class="chips">${u.figli.map(f => chip(ctx, f)).join("")}</div>` : `<p class="vuoto">Nessun figlio indicato.</p>`}</section>
       <section class="note-persona"><h3>Note</h3>${u.note ? `<p>${testoNote(u.note)}</p>` : `<p class="vuoto">Nessuna nota.</p>`}</section>
       ${u.fonte ? `<section><h3>Fonte</h3><p>${esc(u.fonte)}</p></section>` : ""}
-      ${sezionePostit(ctx, uid)}
+      ${sezionePostit(ctx, uid, "unione")}
       ${modifica ? `<section class="azioni">
         <button type="button" class="primario" data-azione="modifica">Modifica</button>
         <button type="button" data-azione="figlio">Aggiungi figlio</button>

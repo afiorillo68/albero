@@ -31,13 +31,20 @@ function biglietto(ctx, n) {
     <div class="firma"><span>${esc(n.autore)}, ${esc(quando(n.creato))}${altro}</span>${comandi}</div></div>`;
 }
 
-// Sezione per la scheda di una persona o di un'unione.
-export function sezionePostit(ctx, nodo) {
+// Invito sopra i post-it: chi legge è il familiare che sa qualcosa; chi modifica li smaltisce.
+const INVITO = {
+  persona: "Se sai la data o il luogo di nascita, un soprannome o altre notizie su questa persona, scrivile in un post-it: l'albero verrà aggiornato appena possibile.",
+  unione: "Se sai quando e dove si sono sposati, se hanno altri figli o altre notizie su questa coppia, scrivile in un post-it: l'albero verrà aggiornato appena possibile.",
+  modifica: "Qui i familiari lasciano notizie e correzioni. Quando hai aggiornato l'albero, togli il post-it.",
+};
+
+// Sezione per la scheda di una persona o di un'unione (tipo: "persona" | "unione").
+export function sezionePostit(ctx, nodo, tipo) {
   const note = postitDi(ctx, nodo);
   return `<section class="sezione-postit" id="postit-scheda"><h3>Post-it${note.length ? ` · ${note.length}` : ""}</h3>
+    <p class="spiegazione">${esc(INVITO[ctx.modifica ? "modifica" : tipo])}</p>
     ${note.map(n => biglietto(ctx, n)).join("")}
-    <button type="button" class="aggiungi-postit" data-azione="postit-aggiungi">+ Aggiungi un post-it</button>
-    ${note.length ? "" : `<p class="spiegazione">Un biglietto che vedono tutti, per esempio per suggerire una correzione.</p>`}</section>`;
+    <button type="button" class="aggiungi-postit" data-azione="postit-aggiungi">+ Aggiungi un post-it</button></section>`;
 }
 
 export const azioneDiPostit = azione => azione?.startsWith("postit-");
