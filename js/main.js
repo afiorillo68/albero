@@ -195,7 +195,7 @@ async function ripristinaStato(r) {
   S.trovati = new Set(r.trovati || []);
   applicaClassi();
   if (r.ricompatta && S.isolamento && S.soloVisibili) ricompatta(true);
-  if (r.disposizione && ctx.modifica) attivaDisposizione(true);
+  if (r.disposizione && ctx.modifica) attivaDisposizione(true, { spiega: false });
   if (r.vista) vista.ripristina(r.vista); else inquadraVisibili({ animato: false, kMax: ZOOM_PIENO });
   const p = r.pannello;
   if (p?.persona && ix.persona.has(p.persona)) mostraPersona(ctx, p.persona);
@@ -823,14 +823,14 @@ function preparaAttrezzi() {
   });
 }
 
-function attivaDisposizione(si) {
+function attivaDisposizione(si, { spiega = true } = {}) {
   if (si && S.ricompatta) ricompatta(false);
   disposizione.attiva(si);
   $("#attrezzi").hidden = !si;
   $("#b-disposizione").classList.toggle("attiva", si);
   aggiornaAttrezzi();
   applicaClassi();
-  if (si) avviso("Trascina le persone per spostarle; tocca una linea per piegarla.");
+  if (si && spiega) avviso("Trascina le persone per spostarle; tocca una linea per piegarla.");
 }
 
 // ------------------------------------------------------------ contesto per i moduli
