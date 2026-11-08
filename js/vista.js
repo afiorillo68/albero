@@ -87,11 +87,11 @@ export function creaVista(svg, gestori = {}) {
     animaVerso({ k, x: sinistra + (r.width - sinistra - destra) / 2 - x * k, y: (r.height - basso) / 2 - y * k });
   }
 
-  // Increspature: tre cerchi per risultato che si allargano e svaniscono, come una goccia
+  // Increspature: due cerchi tenui per risultato che si allargano e svaniscono, come una goccia
   // sull'acqua. Le misure sono in pixel dello schermo, ricalcolate a ogni fotogramma, così
   // si vedono a ogni zoom anche mentre la vista si sta ancora muovendo.
   let onde = [], fotogrammaOnde = null;
-  const DURATA_ONDA = 1300, ALLARGAMENTO = 64;
+  const DURATA_ONDA = 1400, ALLARGAMENTO = 40;
   function increspa(ids) {
     if (!scena) return;
     for (const o of onde) o.c.remove();
@@ -99,14 +99,14 @@ export function creaVista(svg, gestori = {}) {
     const ora = performance.now();
     scena.nodi.filter(n => ids.has(n.id)).forEach((n, i) => {
       const ritardo = Math.min(i * 45, 450) + Math.random() * 120;
-      for (let j = 0; j < 3; j++) {
+      for (let j = 0; j < 2; j++) {
         const c = document.createElementNS(NS, "circle");
         c.setAttribute("class", "onda");
         c.setAttribute("cx", n.x + n.w / 2);
         c.setAttribute("cy", n.cima + n.h / 2);
         c.setAttribute("opacity", 0);
         strato.onde.append(c);
-        onde.push({ c, inizio: ora + ritardo + j * 260, mezzo: n.w / 2 });
+        onde.push({ c, inizio: ora + ritardo + j * 320, mezzo: n.w / 2 });
       }
     });
     if (!fotogrammaOnde) fotogrammaOnde = requestAnimationFrame(animaOnde);
@@ -118,8 +118,8 @@ export function creaVista(svg, gestori = {}) {
       if (f >= 1) { o.c.remove(); return false; }
       const r0 = Math.max(8, o.mezzo * t.k * 0.9), e = 1 - (1 - f) * (1 - f);
       o.c.setAttribute("r", (r0 + ALLARGAMENTO * e) / t.k);
-      o.c.setAttribute("opacity", (1 - f) * 0.9);
-      o.c.setAttribute("stroke-width", (3.4 * (1 - f) + 0.6) / t.k);
+      o.c.setAttribute("opacity", (1 - f) * 0.35);
+      o.c.setAttribute("stroke-width", (1.4 * (1 - f) + 0.5) / t.k);
       return true;
     });
     fotogrammaOnde = onde.length ? requestAnimationFrame(animaOnde) : null;

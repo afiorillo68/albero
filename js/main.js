@@ -264,24 +264,32 @@ function preparaRicerca() {
   let trovati = [], scelto = 0;
   const disegna = () => {
     lista.hidden = !trovati.length;
-    lista.innerHTML = trovati.map((p, i) => {
+    lista.innerHTML = trovati.map(({ p, dove }, i) => {
       const c = S.scena.ix.ceppi.get(p.cognome);
       const n = annoDi(p.nascita?.data), m = annoDi(p.morte?.data);
       const anni = n || m ? ` <span class="anni">${n || "?"}${m ? `–${m}` : ""}</span>` : "";
-      return `<li data-id="${esc(p.id)}" class="${i === scelto ? "scelto" : ""}"><span class="pallino" style="background:${c?.riempimento || "#fff"};border-color:${c?.bordo || "#666"}"></span>${esc(nomeCompleto(p))}${statoInVita(p) === "no" ? " †" : ""}${anni}</li>`;
+      return `<li data-id="${esc(p.id)}" class="${i === scelto ? "scelto" : ""}"><span class="pallino" style="background:${c?.riempimento || "#fff"};border-color:${c?.bordo || "#666"}"></span>${esc(nomeCompleto(p))}${statoInVita(p) === "no" ? " †" : ""}${dove === "nome" ? "" : ` <span class="dove">${dove === "note" ? "nelle note" : "nel luogo"}</span>`}${anni}</li>`;
     }).join("");
   };
-  // mentre si scrive, i risultati si evidenziano e la vista li inquadra
+  // mentre si scrive, i risultati si evidenziano e la vista li inquadra; chi è trovato solo
+  // nelle note o nei luoghi resta nell'elenco ma sull'albero si illumina solo se nessun nome corrisponde
   let attesa = null;
+  const ATTESA_RICERCA = 750;      // ms dall'ultimo tasto prima di evidenziare e inquadrare
   const segna = tutti => {
-    S.trovati = new Set(tutti.map(p => p.id));
-    applicaClassi();
     clearTimeout(attesa);
-    if (S.trovati.size) attesa = setTimeout(() => { inquadraPersone(S.trovati); setTimeout(() => vista.increspa(S.trovati), 120); }, 250);
+    const nelNome = tutti.filter(r => r.dove === "nome");
+    const ids = new Set((nelNome.length ? nelNome : tutti).map(r => r.p.id));
+    if (!ids.size) { S.trovati = ids; applicaClassi(); return; }
+    attesa = setTimeout(() => {
+      S.trovati = ids;
+      applicaClassi();
+      inquadraPersone(ids);
+      setTimeout(() => vista.increspa(ids), 120);
+    }, ATTESA_RICERCA);
   };
-  const vai = p => { if (!p) return; campo.value = ""; trovati = []; disegna(); segna([]); campo.blur(); seleziona(p.id, { centra: true }); };
+  const vai = r => { if (!r) return; campo.value = ""; trovati = []; disegna(); segna([]); campo.blur(); seleziona(r.p.id, { centra: true }); };
   campo.addEventListener("input", () => {
-    const tutti = S.albero ? cerca(S.albero, campo.value) : [];
+    const tutti = S.albero ? cerca(S.albero, campo.value, { dettagli: true }) : [];
     trovati = tutti.slice(0, 8);
     scelto = 0;
     disegna();
@@ -293,7 +301,7 @@ function preparaRicerca() {
     if (e.key === "Enter") vai(trovati[scelto]);
     if (e.key === "Escape") { campo.value = ""; trovati = []; disegna(); segna([]); campo.blur(); }
   });
-  lista.addEventListener("pointerdown", e => { const li = e.target.closest("li"); if (li) { e.preventDefault(); vai(S.albero.persone.find(p => p.id === li.dataset.id)); } });
+  lista.addEventListener("pointerdown", e => { const li = e.target.closest("li"); if (li) { e.preventDefault(); vai(trovati.find(r => r.p.id === li.dataset.id)); } });
   campo.addEventListener("blur", () => setTimeout(() => { lista.hidden = true; }, 150));
   campo.addEventListener("focus", () => { if (trovati.length) lista.hidden = false; });
 }
