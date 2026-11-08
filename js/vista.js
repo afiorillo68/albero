@@ -11,7 +11,7 @@ export function creaVista(svg, gestori = {}) {
   const mondo = document.createElementNS(NS, "g");
   mondo.setAttribute("id", "mondo");
   const strato = {};
-  for (const nome of ["fasce", "archi", "unioni", "nodi", "guide", "maniglie"]) {
+  for (const nome of ["fasce", "archi", "unioni", "nodi", "onde", "guide", "maniglie"]) {
     strato[nome] = document.createElementNS(NS, "g");
     strato[nome].setAttribute("class", `strato-${nome}`);
     mondo.append(strato[nome]);
@@ -40,6 +40,7 @@ export function creaVista(svg, gestori = {}) {
 
   const applica = () => {
     mondo.setAttribute("transform", `translate(${t.x} ${t.y}) scale(${t.k})`);
+    svg.style.setProperty("--k", t.k);       // per gli effetti che restano della stessa misura sullo schermo
     posizionaTestate();
   };
   const limitaK = k => Math.max(0.08, Math.min(4, k));
@@ -84,6 +85,44 @@ export function creaVista(svg, gestori = {}) {
   function centraSu(x, y, { k = t.k, sinistra = 0, destra = 0, basso = 0 } = {}) {
     const r = svg.getBoundingClientRect();
     animaVerso({ k, x: sinistra + (r.width - sinistra - destra) / 2 - x * k, y: (r.height - basso) / 2 - y * k });
+  }
+
+  // Increspature: tre cerchi per risultato che si allargano e svaniscono, come una goccia
+  // sull'acqua. Le misure sono in pixel dello schermo, ricalcolate a ogni fotogramma, così
+  // si vedono a ogni zoom anche mentre la vista si sta ancora muovendo.
+  let onde = [], fotogrammaOnde = null;
+  const DURATA_ONDA = 1300, ALLARGAMENTO = 64;
+  function increspa(ids) {
+    if (!scena) return;
+    for (const o of onde) o.c.remove();
+    onde = [];
+    const ora = performance.now();
+    scena.nodi.filter(n => ids.has(n.id)).forEach((n, i) => {
+      const ritardo = Math.min(i * 45, 450) + Math.random() * 120;
+      for (let j = 0; j < 3; j++) {
+        const c = document.createElementNS(NS, "circle");
+        c.setAttribute("class", "onda");
+        c.setAttribute("cx", n.x + n.w / 2);
+        c.setAttribute("cy", n.cima + n.h / 2);
+        c.setAttribute("opacity", 0);
+        strato.onde.append(c);
+        onde.push({ c, inizio: ora + ritardo + j * 260, mezzo: n.w / 2 });
+      }
+    });
+    if (!fotogrammaOnde) fotogrammaOnde = requestAnimationFrame(animaOnde);
+  }
+  function animaOnde(ora) {
+    onde = onde.filter(o => {
+      const f = (ora - o.inizio) / DURATA_ONDA;
+      if (f < 0) return true;
+      if (f >= 1) { o.c.remove(); return false; }
+      const r0 = Math.max(8, o.mezzo * t.k * 0.9), e = 1 - (1 - f) * (1 - f);
+      o.c.setAttribute("r", (r0 + ALLARGAMENTO * e) / t.k);
+      o.c.setAttribute("opacity", (1 - f) * 0.9);
+      o.c.setAttribute("stroke-width", (3.4 * (1 - f) + 0.6) / t.k);
+      return true;
+    });
+    fotogrammaOnde = onde.length ? requestAnimationFrame(animaOnde) : null;
   }
 
   function disegna(nuova) {
@@ -286,7 +325,7 @@ export function creaVista(svg, gestori = {}) {
 
   applica();
   return {
-    disegna, classi, inquadra, centraSu, daSchermo,
+    disegna, classi, inquadra, centraSu, daSchermo, increspa,
     zoom: f => zoomIn(null, f),
     scala: () => t.k,
     larghezzaTestate: () => (righeTestate.length ? testate.offsetWidth : 0),

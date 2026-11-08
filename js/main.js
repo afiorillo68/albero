@@ -277,7 +277,7 @@ function preparaRicerca() {
     S.trovati = new Set(tutti.map(p => p.id));
     applicaClassi();
     clearTimeout(attesa);
-    if (S.trovati.size) attesa = setTimeout(() => inquadraPersone(S.trovati), 250);
+    if (S.trovati.size) attesa = setTimeout(() => { inquadraPersone(S.trovati); setTimeout(() => vista.increspa(S.trovati), 120); }, 250);
   };
   const vai = p => { if (!p) return; campo.value = ""; trovati = []; disegna(); segna([]); campo.blur(); seleziona(p.id, { centra: true }); };
   campo.addEventListener("input", () => {

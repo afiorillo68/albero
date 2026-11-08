@@ -139,7 +139,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .nodo.morto .riquadro { fill-opacity: .85; }
 .nodo.selezionata .riquadro { stroke: var(--barra-1); stroke-width: 3; filter: drop-shadow(0 4px 12px rgba(31, 58, 77, .35)); }
 .nodo.evidenziato .riquadro { animation: pulsa 0.6s ease-in-out 3; }
-.nodo.trovato .riquadro { stroke: #e0a100; stroke-width: 3.5; }
+/* risultati della ricerca: bordo e alone dorati, della stessa misura sullo schermo a ogni zoom (--k è lo zoom) */
+.nodo.trovato .riquadro {
+  stroke: #e39b00; stroke-width: max(3.5px, calc(3px / var(--k, 1)));
+  filter: drop-shadow(0 0 calc(6px / var(--k, 1)) rgba(255, 170, 0, .95)) drop-shadow(0 0 calc(16px / var(--k, 1)) rgba(255, 170, 0, .65));
+}
+.strato-onde { pointer-events: none; }
+.onda { fill: none; stroke: #f0a000; }
 @keyframes pulsa { 50% { stroke-width: 6; stroke: #e0a100; } }
 .attenuato { opacity: .13; }
 .nascosto { display: none; }
