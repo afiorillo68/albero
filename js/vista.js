@@ -73,13 +73,17 @@ export function creaVista(svg, gestori = {}) {
     animazione = requestAnimationFrame(passo);
   }
 
-  // sinistra, destra e basso: pixel coperti da intestazioni e pannello, da lasciare fuori dall'inquadratura
-  function inquadra(box, { margine = 28, animato = true, kMax = 1.2, sinistra = 0, destra = 0, basso = 0 } = {}) {
+  // sinistra, destra e basso: pixel coperti da intestazioni e pannello, da lasciare fuori dall'inquadratura.
+  // kMin e fuoco: se per far stare tutto il riquadro si scenderebbe sotto kMin, si resta a kMin
+  // centrati sul punto «fuoco» del disegno.
+  function inquadra(box, { margine = 28, animato = true, kMax = 1.2, kMin = 0, fuoco = null, sinistra = 0, destra = 0, basso = 0 } = {}) {
     const r = svg.getBoundingClientRect();
     const lw = Math.max(80, r.width - sinistra - destra), lh = Math.max(80, r.height - basso);
     const w = Math.max(1, box.x2 - box.x), h = Math.max(1, box.y2 - box.y);
     const k = limitaK(Math.min((lw - 2 * margine) / w, (lh - 2 * margine) / h, kMax));
-    const dest = { k, x: sinistra + (lw - w * k) / 2 - box.x * k, y: (lh - h * k) / 2 - box.y * k };
+    const dest = fuoco && k < kMin
+      ? { k: limitaK(kMin), x: sinistra + lw / 2 - fuoco.x * limitaK(kMin), y: lh / 2 - fuoco.y * limitaK(kMin) }
+      : { k, x: sinistra + (lw - w * k) / 2 - box.x * k, y: (lh - h * k) / 2 - box.y * k };
     if (animato) animaVerso(dest); else { t = dest; applica(); gestori.suZoom?.(t.k); }
   }
 

@@ -7,7 +7,7 @@ import { creaDisposizione } from "./disposizione.js";
 import { componiScena } from "./scena.js";
 import { documentoSVG, esc } from "./svg.js";
 import { aJSON, aGEDCOM, aDrawio, aCSVPersone, aCSVUnioni } from "./esporta.js";
-import { cerca, nomeCompleto } from "./grafo.js";
+import { cerca, nomeCompleto, parenti } from "./grafo.js";
 import { impagina, GEOMETRIA } from "./layout.js";
 import { ingressoLayout, annoDi, statoInVita } from "./deduzioni.js";
 import { filtriVuoti, attivi, visibilita, descriviIsolamento, ALTRI, MANCANTI, VOCI_VITA } from "./filtri.js";
@@ -305,22 +305,53 @@ function seleziona(id, { centra = false, pannello = true } = {}) {
   if (centra) {
     const n = S.scena.nodi.find(x => x.id === id);
     if (n) vista.centraSu(n.x + W / 2, n.y + H / 2, riserva());
-    S.evidenziati = new Set([id]);
-    applicaClassi();
-    setTimeout(() => { S.evidenziati = new Set(); applicaClassi(); }, 1800);
+    evidenzia(id);
   }
 }
 
-// Apre la scheda di una persona o di un'unione; con «postit» scorre fino ai post-it.
+function evidenzia(id) {
+  S.evidenziati = new Set([id]);
+  applicaClassi();
+  setTimeout(() => { S.evidenziati = new Set(); applicaClassi(); }, 1800);
+}
+
+const ZOOM_LEGGIBILE = 0.8;      // sotto, i nomi nei riquadri scendono sotto i 10 pixel
+
+// Si avvicina a una persona con genitori, partner e figli, o a un'unione con partner e figli,
+// per vedere che cosa ha intorno prima di applicare un post-it o un suggerimento. Se la
+// famiglia è troppo larga per leggerci i nomi, centra sul riquadro a zoom leggibile.
+function inquadraIntorno(id, tipo) {
+  const ix = S.scena.ix;
+  let ids, fuoco;
+  if (tipo === "persona") {
+    const r = parenti(ix, id), n = S.scena.nodi.find(x => x.id === id);
+    ids = new Set([id, ...r.genitori, ...r.unioni.flatMap(u => [u.partner, ...u.figli])]);
+    fuoco = n && { x: n.x + W / 2, y: n.cima + n.h / 2 };
+  } else {
+    const u = ix.unione.get(id), su = S.scena.unioni.find(x => x.id === id);
+    ids = new Set(u ? [...u.partner, ...u.figli] : []);
+    fuoco = su && { x: su.x, y: su.y };
+  }
+  if (!fuoco) return;
+  const nascosto = q => q !== id && S.soloVisibili && S.dentro && !S.dentro.has(q);
+  const nodi = S.scena.nodi.filter(n => ids.has(n.id) && !nascosto(n.id));
+  const box = nodi.length ? ingombro(nodi) : { x: fuoco.x, y: fuoco.y, x2: fuoco.x, y2: fuoco.y };
+  vista.inquadra(box, { kMax: ZOOM_PIENO, kMin: ZOOM_LEGGIBILE, fuoco, ...riserva() });
+}
+
+// Apre la scheda di una persona o di un'unione; con «centra» la vista ci si avvicina e la
+// mostra con la famiglia stretta, con «postit» la scheda scorre fino ai post-it.
 function apriNodo(id, tipo, { centra = false, postit = false } = {}) {
-  if (tipo === "persona") seleziona(id, { centra });
+  if (tipo === "persona") seleziona(id);
   else {
     S.sel = null;
     S.selUnione = id;
     applicaClassi();
     mostraUnione(ctx, id);
-    const u = S.scena.unioni.find(x => x.id === id);
-    if (centra && u) vista.centraSu(u.x, u.y, riserva());
+  }
+  if (centra) {
+    inquadraIntorno(id, tipo);
+    if (tipo === "persona") evidenzia(id);
   }
   if (postit) $("#postit-scheda")?.scrollIntoView({ block: "start", behavior: "smooth" });
 }
